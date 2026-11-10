@@ -47,6 +47,30 @@ Los proxies inversos convencionales intentan engañar a `cloudcode-pa.googleapis
 
 ---
 
+## Arranque
+
+Requisitos: Go 1.27+ y la CLI `agy` de Antigravity en el `PATH`, con sesión iniciada una vez (`agy` interactivo o `agy acp --login`). subpipe nunca maneja credenciales.
+
+```bash
+go run ./cmd/subpipe                      # escucha en 127.0.0.1:9099
+go run ./cmd/subpipe -addr 127.0.0.1:9100 -agy "C:\ruta\agy.exe acp" -workdir D:\tmp\agy-work
+```
+
+| Flag | Default | Uso |
+| --- | --- | --- |
+| `-addr` | `127.0.0.1:9099` | Dirección de escucha. |
+| `-agy` | `agy acp` | Línea de comando que lanza el servidor ACP de Antigravity. |
+| `-workdir` | `<temp>/subpipe-antigravity` | Directorio de trabajo de las sesiones de `agy`. |
+
+Estado: `POST /v1/chat/completions` unario (`stream: false`). `stream: true` responde 400 hasta el ticket 03; `/v1/models` y `/healthz` llegan en el ticket 04.
+
+```bash
+curl http://127.0.0.1:9099/v1/chat/completions -H "Content-Type: application/json" \
+  -d '{"model":"antigravity/gemini-3.8-pro","messages":[{"role":"user","content":"hola"}]}'
+```
+
+---
+
 ## Modos de integración
 
 ### 1. Conexión directa (Recomendado)
