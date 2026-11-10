@@ -6,7 +6,7 @@ Módulo en Go que detecta la instancia activa de `language_server.exe` leyendo e
 **Blocked by:**  
 None (can start immediately).
 
-**Status:** resolved
+**Status:** superseded (2026-11-10) — el backend `antigravity` pasó a `agy acp` (ADR 0001, revisión 2). El código de este ticket se elimina y queda en el historial de git (`df6fa0f`).
 
 ## Acceptance criteria
 

@@ -1,6 +1,8 @@
 # subpipe
 
-Micro-gateway local que traduce peticiones HTTP compatibles con OpenAI (`/v1/chat/completions`) hacia el cliente oficial instalado de cada proveedor. Cada proveedor es un **backend** independiente (ver [ADR 0002](docs/adr/0002-vendor-backend-modules.md)); el primero es Google Antigravity, al que subpipe habla por su RPC local (ConnectRPC/JSON sobre `http://127.0.0.1:<httpPort>`, autenticado con `x-codeium-csrf-token`) en `language_server.exe`.
+Micro-gateway local que traduce peticiones HTTP compatibles con OpenAI (`/v1/chat/completions`) hacia el cliente oficial instalado de cada proveedor. Cada proveedor es un **backend** independiente (ver [ADR 0002](docs/adr/0002-vendor-backend-modules.md)); el primero es Google Antigravity, al que subpipe habla lanzando `agy acp` (Agent Client Protocol: JSON-RPC sobre stdin/stdout del proceso hijo, ver [ADR 0001](docs/adr/0001-persistent-subprocess-go-bridge.md)).
+
+> **Aviso:** las FAQ de Antigravity indican que envolver `agy` en aplicaciones de terceros no está soportado en planes de consumo. Usar subpipe con una cuenta personal es un riesgo que asume quien lo usa.
 
 Diseñado para utilizar Gemini 3.8 / Claude desde **OpenCode**, **Claude Code**, **Cursor** u otros agentes, eliminando de raíz las suspensiones `403 TOS_VIOLATION` provocadas por la emulación de cabeceras en proxies HTTP tradicionales.
 
@@ -31,11 +33,11 @@ Los proxies inversos convencionales intentan engañar a `cloudcode-pa.googleapis
       │  Traductor local │
       └─────────┬────────┘
                 │
-                │  backend antigravity: ConnectRPC/JSON sobre
-                │  http://127.0.0.1:<httpPort> (x-codeium-csrf-token)
+                │  backend antigravity: ACP v1
+                │  (JSON-RPC por stdin/stdout)
                 ▼
    ┌────────────────────────┐
-   │  language_server.exe   │  (Subproceso oficial Google)
+   │        agy acp         │  (Subproceso oficial Google)
    └────────────┬───────────┘
                 │
                 │  HTTPS nativo oficial (TLS + cl de Google)

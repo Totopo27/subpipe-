@@ -12,7 +12,7 @@ Estas suspensiones son producto de la detección perimetral de Google, la cual i
 
 ## Solution
 
-`subpipe` es un micro-gateway local desarrollado en Go que expone un endpoint HTTP compatible con la API de OpenAI (`/v1/chat/completions` y `/v1/models`). En lugar de realizar peticiones de red hacia los servidores de Google, `subpipe` se conecta a la instancia oficial de `language_server.exe` de Google Antigravity instalada en la máquina.
+`subpipe` es un micro-gateway local desarrollado en Go que expone un endpoint HTTP compatible con la API de OpenAI (`/v1/chat/completions` y `/v1/models`). En lugar de realizar peticiones de red hacia los servidores de Google, `subpipe` lanza el cliente oficial de Google Antigravity instalado en la máquina (`agy acp`) y le habla por el Agent Client Protocol.
 
 Toda la comunicación externa hacia `cloudcode-pa.googleapis.com` la realiza exclusivamente el binario oficial de Google, el cual conserva certificados TLS legítimos, cabeceras oficiales, changelist exacto y conexiones HTTP/1.1 persistentes.
 
@@ -23,9 +23,9 @@ Toda la comunicación externa hacia `cloudcode-pa.googleapis.com` la realiza exc
 3. As a developer using Aider, I want to execute chat completions with streaming SSE output, so that I see token generation in real time on my terminal.
 4. As a CPAMC user, I want to configure `subpipe` as an upstream provider in `config.yaml`, so that I retain CPAMC's quota tracking and web dashboard while delegating network traffic safely.
 5. As a developer working with multiple Google accounts, I want each workspace session to maintain strict affinity to a single subpipe profile, so that turn-by-turn prompts are never scattered across multiple accounts.
-6. As a system administrator, I want `subpipe` to automatically discover an already-running `language_server.exe` process, so that it connects with zero startup latency without spawning duplicate processes.
-7. As a developer starting clean, I want `subpipe` to launch and supervise `language_server.exe` if none is active, so that the service runs autonomously without manual IDE intervention.
-8. As a client agent, I want `subpipe` to restart the language server if the process dies unexpectedly, so that long-running coding sessions do not crash permanently.
+6. (Dropped 2026-11-10: attaching to a running `language_server.exe` does not apply to `agy acp`, which subpipe always spawns itself. See ADR 0001.)
+7. As a developer starting clean, I want `subpipe` to launch and supervise `agy acp`, so that the service runs autonomously without manual IDE intervention.
+8. As a client agent, I want `subpipe` to restart `agy acp` if the process dies unexpectedly, so that long-running coding sessions do not crash permanently.
 9. As an agent querying `/v1/models`, I want a valid list of Gemini 3.8 models, so that client model-selectors populate correctly.
 
 ## Implementation Decisions
@@ -37,8 +37,8 @@ Toda la comunicación externa hacia `cloudcode-pa.googleapis.com` la realiza exc
 - Las secciones 1, 3 y 4 describen el backend `antigravity`.
 
 ### 1. Architectural Seam and Communication Protocol (backend `antigravity`)
-- `subpipe` se comunica con `language_server.exe` a través de su servidor RPC local (ConnectRPC / HTTP JSON) en `127.0.0.1:<httpPort>`, autenticado mediante la cabecera `x-codeium-csrf-token`.
-- Los datos de conexión (puerto dinámico y CSRF token) se obtienen dinámicamente desde el archivo de descubrimiento oficial (`%USERPROFILE%\.gemini\antigravity\daemon\hub_<port>.json`) o se definen al lanzar el proceso en modo supervisado.
+- `subpipe` lanza `agy acp` como proceso hijo persistente y le habla por ACP v1: JSON-RPC 2.0 delimitado por saltos de línea sobre `stdin`/`stdout` (`stderr` solo es log). Ver ADR 0001, revisión (2).
+- No hay puerto, archivo de descubrimiento ni token local. La autenticación con Google la hace `agy` con las credenciales cacheadas por un `agy` interactivo o `agy acp --login`; subpipe nunca toca credenciales.
 
 ### 2. Ingress HTTP Module
 - Expone un servidor HTTP estándar en Go en el puerto `127.0.0.1:9099`.
@@ -47,31 +47,29 @@ Toda la comunicación externa hacia `cloudcode-pa.googleapis.com` la realiza exc
   - `GET /v1/models`: Retorna la unión de catálogos de todos los backends registrados, con prefijo (`antigravity/gemini-3.8-pro`, `antigravity/gemini-3.8-flash`).
   - `GET /healthz`: Chequeo de salud del gateway y estado de conexión con el subproceso.
 
-### 3. Translation and Cascade Protocol Engine
-- Mapea el historial de mensajes de OpenAI (`system`, `user`, `assistant`) hacia los llamados RPC de Antigravity:
-  - Creación de trayectoria mediante `StartCascade` (usando un UUID determinista o aleatorio por sesión).
-  - Envío de contexto y mensaje mediante `SendUserCascadeMessage` (`items: [{ text: content }]`).
-  - Consumo de flujo de actualización de estado del agente mediante `StreamAgentStateUpdates`.
-- Traduce los eventos recibidos hacia bloques SSE formateados bajo la especificación OpenAI:
+### 3. Translation and ACP Engine (backend `antigravity`)
+- Mapea el historial de mensajes de OpenAI (`system`, `user`, `assistant`) hacia ACP:
+  - `initialize` una vez por proceso (versión de protocolo 1, sin capacidades `fs` ni `terminal`).
+  - `session/new {cwd, mcpServers: []}` por conversación y `session/set_config_option` para el modelo.
+  - `session/prompt` con el historial aplanado en bloques de texto.
+  - Consumo de las notificaciones `session/update` (`agent_message_chunk`) hasta que `session/prompt` responde con `stopReason`. Las peticiones `session/request_permission` se rechazan; la cancelación envía `session/cancel`.
+- Traduce los fragmentos recibidos hacia bloques SSE formateados bajo la especificación OpenAI:
   `data: {"id":"chatcmpl-...","object":"chat.completion.chunk","choices":[{"delta":{"content":"..."}}]}` seguido de `data: [DONE]`.
 
 ### 4. Process Supervisor and Lifecycle
-- Implementa una interfaz de gestión del ciclo de vida (`Supervisor`):
-  - Modo Adjunto (*Attach*): Detecta si existe un demonio activo en el directorio de runtime de Antigravity.
-  - Modo Huésped (*Spawn*): Si no hay demonio activo, ejecuta `language_server.exe --standalone` como proceso hijo en segundo plano.
-  - Mecanismo de *heartbeat* y reconexión automática si el proceso hijo finaliza.
+- subpipe es dueño del proceso `agy acp`: lo lanza, lo cierra (cerrando `stdin` y matándolo tras un periodo de gracia) y lo relanza si muere (ticket 04).
+- Ya no hay modo adjunto (*attach*) ni `language_server.exe --standalone`; ver ADR 0001, revisión (2).
 
 ## Testing Decisions
 
 ### Good Test Criteria
 - Las pruebas deben validar el comportamiento observable a través de la interfaz HTTP (`/v1/chat/completions` y `/v1/models`), no el estado interno privado del traductor.
-- Pruebas de integración sobre un mock del servidor ConnectRPC local para verificar la traducción exacta de mensajes y streaming SSE sin depender de credenciales vivas de Google.
-- Pruebas unitarias de parsing del archivo `hub_*.json` y control del supervisor de procesos.
+- Pruebas de integración contra un agente ACP falso (el binario de test relanzado como hijo) para verificar la traducción exacta de mensajes y streaming SSE sin depender de credenciales vivas de Google.
 
 ### Modules to Test
 - `internal/server`: Validación de contratos HTTP y streaming chunked/SSE, contra un backend falso.
 - `internal/backend`: Contrato y enrutado por prefijo (`Registry`).
-- `internal/backend/antigravity`: Descubrimiento, CSRF, ciclo de vida del proceso (supervisor) y traducción a Cascade RPC contra un servidor ConnectRPC simulado.
+- `internal/backend/antigravity`: Ciclo de vida de `agy acp` y traducción a ACP contra un agente ACP falso.
 
 ## Out of Scope
 
@@ -81,5 +79,5 @@ Toda la comunicación externa hacia `cloudcode-pa.googleapis.com` la realiza exc
 
 ## Further Notes
 
-- El binario oficial identificado en Windows es `C:\Users\ttoto\AppData\Local\Programs\antigravity\resources\bin\language_server.exe`.
-- El changelist oficial verificado en este entorno es `1013060670` (versión `2.29.0`).
+- El backend usa `agy` desde `PATH` (configurable). En esta máquina `agy` todavía no está instalado; el ticket 02 se construye contra un agente falso.
+- Histórico: el binario `language_server.exe` (versión `2.29.0`, changelist `1013060670`) era el transporte anterior.

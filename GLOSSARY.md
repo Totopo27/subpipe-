@@ -13,12 +13,12 @@ A self-contained module (`internal/backend/<name>`) that drives one vendor's off
 _Avoid_: Provider adapter, plugin, driver
 
 **Official Subprocess**:
-The genuine, locally installed vendor executable (for the `antigravity` Backend, Google's `language_server.exe`), either attached to or spawned and supervised by subpipe.
+The genuine, locally installed vendor executable (for the `antigravity` Backend, Google's `agy` CLI run as `agy acp`), spawned and supervised by subpipe as a persistent child.
 _Avoid_: Fake client, emulated binary, mock engine
 
 **Local RPC**:
-The loopback channel a Backend uses to talk to its Official Subprocess. For `antigravity`: ConnectRPC with JSON bodies on `http://127.0.0.1:<httpPort>`, authenticated by `x-codeium-csrf-token`.
-_Avoid_: OS pipe (not the transport), upstream API
+The local channel a Backend uses to talk to its Official Subprocess. For `antigravity`: the Agent Client Protocol (ACP v1), newline-delimited JSON-RPC over the child's stdin/stdout.
+_Avoid_: upstream API, network proxy
 
 **Session Affinity**:
 A strict one-to-one binding between a workspace task and a persistent subprocess profile, preventing multi-account round-robin leaks.

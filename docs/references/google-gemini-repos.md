@@ -35,7 +35,7 @@ Este documento registra los repositorios de referencia analizados para `subpipe`
     - Guardas de redirección segura entre orígenes (`SameOriginRedirect`).
     - Manejo idiomático de streaming en Go con cancelación de contextos (`context.Context`).
     - Comportamiento ante timeouts y retries exponenciales en Go.
-  - Ojo: este CLI usa API keys hacia la API pública (`generativelanguage.googleapis.com`), mientras que `subpipe` hace puente hacia el subproceso `language_server.exe` de Antigravity (ConnectRPC sobre HTTP local). La referencia de `gemini-api-cli` es para patrones de cliente HTTP, streaming y diseño CLI en Go, no para el protocolo interno Cascade.
+  - Ojo: este CLI usa API keys hacia la API pública (`generativelanguage.googleapis.com`), mientras que `subpipe` hace puente hacia el cliente oficial `agy acp` de Antigravity (ACP por stdin/stdout; antes `language_server.exe` por ConnectRPC). La referencia de `gemini-api-cli` es para patrones de cliente HTTP, streaming y diseño CLI en Go, no para el protocolo interno Cascade.
 
 ---
 

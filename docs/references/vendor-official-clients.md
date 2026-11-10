@@ -280,9 +280,10 @@ Technical takeaways:
 - `agy acp` is an ACP server built into the official Antigravity CLI. The
   bridge reports text streaming, exact token usage, `session/load` resume and
   cancellation as verified on agy 1.5.3. It is a public, documented surface,
-  unlike the internal `language_server.exe` ConnectRPC API that subpipe uses
-  today. **UNVERIFIED** against Google's own docs, but the Antigravity docs
-  list "Other editors (ACP)".
+  unlike the internal `language_server.exe` ConnectRPC API that subpipe used
+  before. Confirmed in Google's docs
+  (https://antigravity.google/docs/ide/extensions/acp); subpipe moved to it in
+  ADR 0001 revision (2).
 - Both bridges keep one persistent client process and bind each host session to
   the client's own conversation id, sending only the latest user message per
   turn.

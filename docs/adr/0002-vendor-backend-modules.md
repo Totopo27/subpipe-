@@ -4,11 +4,11 @@ status: accepted
 
 # 0002: Vendor Backend Modules
 
-Each vendor is a **Backend**: a self-contained module under `internal/backend/<name>` that drives that vendor's official local client (Antigravity `language_server.exe` today; Claude Code CLI and Codex CLI are expected later). The gateway core — HTTP ingress, OpenAI wire format, SSE egress, routing — is vendor-neutral and only sees the `backend.Backend` interface.
+Each vendor is a **Backend**: a self-contained module under `internal/backend/<name>` that drives that vendor's official local client (Antigravity `agy acp` today, see ADR 0001; Claude Code CLI and Codex CLI are expected later). The gateway core — HTTP ingress, OpenAI wire format, SSE egress, routing — is vendor-neutral and only sees the `backend.Backend` interface.
 
 ## Why
 
-The Antigravity work showed that everything vendor-specific — discovery, spawn flags, local auth, the RPC protocol, the model catalogue — changes independently of the OpenAI-facing gateway. Claude and GPT have the same shape: an official client with its own protocol and lifecycle that must remain the only process talking to the vendor's network. Hard-wiring Cascade calls into the HTTP handlers would force a rewrite per vendor.
+The Antigravity work showed that everything vendor-specific — discovery, spawn flags, local auth, the RPC protocol, the model catalogue — changes independently of the OpenAI-facing gateway. Claude and GPT have the same shape: an official client with its own protocol and lifecycle that must remain the only process talking to the vendor's network. Hard-wiring vendor calls into the HTTP handlers would force a rewrite per vendor — and the Antigravity transport itself already changed once (ConnectRPC to ACP) without touching the contract.
 
 ## Decision
 
