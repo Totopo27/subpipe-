@@ -1,6 +1,6 @@
 # subpipe
 
-Micro-gateway local que traduce peticiones HTTP compatibles con OpenAI (`/v1/chat/completions`) hacia el subproceso oficial de Google Antigravity (`language_server.exe` / `agy.exe`) mediante tuberías estándar de sistema operativo (`stdin` / `stdout`).
+Micro-gateway local que traduce peticiones HTTP compatibles con OpenAI (`/v1/chat/completions`) hacia el cliente oficial instalado de cada proveedor. Cada proveedor es un **backend** independiente (ver [ADR 0002](docs/adr/0002-vendor-backend-modules.md)); el primero es Google Antigravity, al que subpipe habla por su RPC local (ConnectRPC/JSON sobre `http://127.0.0.1:<httpPort>`, autenticado con `x-codeium-csrf-token`) en `language_server.exe`.
 
 Diseñado para utilizar Gemini 3.8 / Claude desde **OpenCode**, **Claude Code**, **Cursor** u otros agentes, eliminando de raíz las suspensiones `403 TOS_VIOLATION` provocadas por la emulación de cabeceras en proxies HTTP tradicionales.
 
@@ -31,7 +31,8 @@ Los proxies inversos convencionales intentan engañar a `cloudcode-pa.googleapis
       │  Traductor local │
       └─────────┬────────┘
                 │
-                │  Tuberías OS (stdin / stdout - stream-json)
+                │  backend antigravity: ConnectRPC/JSON sobre
+                │  http://127.0.0.1:<httpPort> (x-codeium-csrf-token)
                 ▼
    ┌────────────────────────┐
    │  language_server.exe   │  (Subproceso oficial Google)
@@ -55,13 +56,13 @@ Apunta tu cliente de desarrollo directamente al puerto de `subpipe`:
     "provider": {
       "name": "subpipe",
       "baseUrl": "http://127.0.0.1:9099/v1",
-      "model": "gemini-3.8-pro"
+      "model": "antigravity/gemini-3.8-pro"
     }
   }
   ```
 * **Aider:**
   ```bash
-  aider --openai-api-base http://127.0.0.1:9099/v1 --model openai/gemini-3.8-pro
+  aider --openai-api-base http://127.0.0.1:9099/v1 --model openai/antigravity/gemini-3.8-pro
   ```
 * **Cursor / Windsurf:**
   En ajustes de proveedor OpenAI, sobrescribir *Base URL* con `http://127.0.0.1:9099/v1`.
@@ -77,8 +78,8 @@ Si utilizas CPAM y quieres conservar su panel web, métricas y gestión de cuota
        base-url: "http://host.docker.internal:9099/v1"
        api-key: "local-dev"
        models:
-         - name: "gemini-3.8-pro"
-         - name: "gemini-3.8-flash"
+         - name: "antigravity/gemini-3.8-pro"
+         - name: "antigravity/gemini-3.8-flash"
    ```
 CPAM gestionará la interfaz, pero delegará la salida a `subpipe`, evitando la conexión directa del proxy a Google.
 

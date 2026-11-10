@@ -30,7 +30,13 @@ Toda la comunicación externa hacia `cloudcode-pa.googleapis.com` la realiza exc
 
 ## Implementation Decisions
 
-### 1. Architectural Seam and Communication Protocol
+### 0. Vendor Backend Modules (ADR 0002)
+- Todo lo específico de un proveedor vive en `internal/backend/<name>` e implementa `backend.Backend`. El núcleo (ingress HTTP, formato OpenAI, SSE, enrutado) no conoce proveedores.
+- Los ids de modelo son `<backend>/<model>` (`antigravity/gemini-3.8-pro`); el `Registry` resuelve el prefijo.
+- Backend actual: `antigravity`. Previstos (no construidos): Claude Code CLI, Codex CLI — cada uno con su cliente oficial local.
+- Las secciones 1, 3 y 4 describen el backend `antigravity`.
+
+### 1. Architectural Seam and Communication Protocol (backend `antigravity`)
 - `subpipe` se comunica con `language_server.exe` a través de su servidor RPC local (ConnectRPC / HTTP JSON) en `127.0.0.1:<httpPort>`, autenticado mediante la cabecera `x-codeium-csrf-token`.
 - Los datos de conexión (puerto dinámico y CSRF token) se obtienen dinámicamente desde el archivo de descubrimiento oficial (`%USERPROFILE%\.gemini\antigravity\daemon\hub_<port>.json`) o se definen al lanzar el proceso en modo supervisado.
 
@@ -38,7 +44,7 @@ Toda la comunicación externa hacia `cloudcode-pa.googleapis.com` la realiza exc
 - Expone un servidor HTTP estándar en Go en el puerto `127.0.0.1:9099`.
 - Endpoints soportados:
   - `POST /v1/chat/completions`: Soporta payloads estándar de OpenAI con flag `stream: true` (SSE) y `stream: false` (JSON completo).
-  - `GET /v1/models`: Retorna catálogo de modelos compatibles (`gemini-3.8-pro`, `gemini-3.8-flash`).
+  - `GET /v1/models`: Retorna la unión de catálogos de todos los backends registrados, con prefijo (`antigravity/gemini-3.8-pro`, `antigravity/gemini-3.8-flash`).
   - `GET /healthz`: Chequeo de salud del gateway y estado de conexión con el subproceso.
 
 ### 3. Translation and Cascade Protocol Engine
@@ -63,9 +69,9 @@ Toda la comunicación externa hacia `cloudcode-pa.googleapis.com` la realiza exc
 - Pruebas unitarias de parsing del archivo `hub_*.json` y control del supervisor de procesos.
 
 ### Modules to Test
-- `server`: Validación de contratos HTTP y streaming chunked/SSE.
-- `translator`: Transformación bidireccional entre OpenAI JSON y Cascade RPC.
-- `supervisor`: Detección de puertos, lectura de CSRF token y ciclo de vida de procesos en Windows.
+- `internal/server`: Validación de contratos HTTP y streaming chunked/SSE, contra un backend falso.
+- `internal/backend`: Contrato y enrutado por prefijo (`Registry`).
+- `internal/backend/antigravity`: Descubrimiento, CSRF, ciclo de vida del proceso (supervisor) y traducción a Cascade RPC contra un servidor ConnectRPC simulado.
 
 ## Out of Scope
 

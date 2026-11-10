@@ -10,6 +10,7 @@ Soporte completo para peticiones con `stream: true` en `POST /v1/chat/completion
 
 ## Acceptance criteria
 
+- [ ] El contrato `backend.Backend` gana un método de streaming neutral; el formateo SSE vive en `internal/server` y la lectura de `StreamAgentStateUpdates` en `internal/backend/antigravity`.
 - [ ] Soporte para cabeceras SSE (`Content-Type: text/event-stream`, `Cache-Control: no-cache`).
 - [ ] Conexión y lectura continua del stream de `StreamAgentStateUpdates`.
 - [ ] Extracción y envío progresivo de fragmentos de texto (*chunks*) según se van generando en el modelo.

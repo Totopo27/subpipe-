@@ -1,10 +1,11 @@
-// Package supervisor finds or launches the official language_server.exe and
-// exposes the local ConnectRPC endpoint (port + CSRF token) subpipe talks to.
+// Package antigravity is the subpipe backend for Google Antigravity. Its
+// supervisor (this file) finds or launches the official language_server.exe
+// and exposes the local ConnectRPC endpoint (port + CSRF token).
 //
 // Attach mode reads the discovery files the official binary writes under
 // %USERPROFILE%\.gemini\antigravity\daemon\hub_<port>.json. Spawn mode starts
 // language_server.exe --standalone as a child process when no live hub exists.
-package supervisor
+package antigravity
 
 import (
 	"bytes"

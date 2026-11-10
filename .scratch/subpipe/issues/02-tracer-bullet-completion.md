@@ -12,6 +12,8 @@ Servidor HTTP en Go escuchando en `127.0.0.1:9099` que implementa `POST /v1/chat
 
 - [ ] Servidor HTTP escuchando en el puerto configurable (default `127.0.0.1:9099`).
 - [ ] Endpoint `POST /v1/chat/completions` acepta payload estándar con `model`, `messages` y `stream: false`.
+- [ ] `model` se resuelve por prefijo con `backend.Registry` (`antigravity/gemini-3.8-pro`); prefijo desconocido → 400 con error estilo OpenAI. El handler HTTP (`internal/server`) solo conoce `backend.Backend`.
+- [ ] Lo siguiente vive en `internal/backend/antigravity` (implementa `backend.Backend`):
 - [ ] Genera un `cascade_id` (UUIDv4) para la conversación.
 - [ ] Realiza llamada ConnectRPC a `StartCascade` con `source: 1` (`CASCADE_CLIENT`) y `trajectory_type: 4` (`CASCADE`).
 - [ ] Realiza llamada ConnectRPC a `SendUserCascadeMessage` con el contenido del prompt.

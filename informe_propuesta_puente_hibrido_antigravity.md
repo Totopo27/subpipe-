@@ -1,5 +1,7 @@
 # subpipe: Arquitectura de puente por subproceso local para Antigravity
 
+> **Nota histórica (2026-11-10):** este informe es la propuesta original. El transporte descrito aquí (tuberías `stdin`/`stdout`, `stream-json`/ACP) no es el implementado: `language_server.exe` se controla por su RPC local (ConnectRPC/JSON sobre `http://127.0.0.1:<httpPort>` con `x-codeium-csrf-token`). Ver ADR 0001 (revisado) y ADR 0002.
+
 Documento de diseño técnico para desacoplar clientes agénticos (OpenCode, Claude Code, Cursor) de los bloqueos `403 TOS_VIOLATION` en `cloudcode-pa.googleapis.com`.
 
 ---
