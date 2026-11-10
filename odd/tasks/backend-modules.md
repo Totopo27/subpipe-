@@ -14,10 +14,10 @@ Branch: `feat/backend-modules` (base `34768b7`). Delivery: ask-on-risk. Test run
 
 ## Tasks
 
-- [ ] T1 — S3: correct transport description in GLOSSARY, ADR 0001, README, spec; add ADR 0002 (backend modules) and GLOSSARY term **Backend**. Route: inline.
-- [ ] T2 — S4: move `internal/supervisor` → `internal/backend/antigravity`; tests green. Route: inline.
-- [ ] T3 — S2, S4, S5: `internal/backend` contract (`Backend` interface) + `Registry` prefix routing with tests (RED→GREEN). Route: inline.
-- [ ] T4 — S6: re-scope tickets 02–04 and spec module list to the backend layout. Route: inline.
+- [x] T1 — S3: correct transport description in GLOSSARY, ADR 0001, README, spec; add ADR 0002 (backend modules) and GLOSSARY term **Backend**. Route: inline. Commit `df6fa0f`.
+- [x] T2 — S4: move `internal/supervisor` → `internal/backend/antigravity`; tests green. Route: inline. Commit `df6fa0f`.
+- [x] T3 — S2, S4, S5: `internal/backend` contract (`Backend` interface) + `Registry` prefix routing with tests (RED: undefined Model/Request → GREEN). Route: inline. Commit `df6fa0f`.
+- [x] T4 — S6: re-scope tickets 02–04 and spec module list to the backend layout. Route: inline. Commit `df6fa0f`.
 - [ ] T5 — S6: Ticket 02 implementation. Route: inline (no writer reason: single dependent unit).
 
 ## Log
@@ -26,3 +26,5 @@ Branch: `feat/backend-modules` (base `34768b7`). Delivery: ask-on-risk. Test run
 - **L2** (2026-11-10): user chose "Clientes oficiales propios (Recommended)" for the meaning of Claude/GPT.
 - **L3**: baseline commit `34768b7` (repo had no commits); branch `feat/backend-modules` created. `go test ./...` green at baseline.
 - **L4** Route evidence: all tasks inline — no parallel independent units, no context backstop. Risk forecast: refactor of internal package only (no external consumers yet) → none of items 1–5; item 6 mitigated by existing supervisor tests.
+- **L5**: T1–T4 done in `df6fa0f`. `go vet` clean, `go test ./...` green (backend, backend/antigravity). RDD assess (base `34768b7`, committed-only): risk `medium`, `review_due: false` (`under_budget`) — no review, slice stays open. `Health` dropped from the contract until ticket 04 (YAGNI); ADR 0002 updated.
+- **L6**: Next: T5 (Ticket 02). Pending user confirmation of S5 (prefixed model ids) before building ingress on it. Unary response retrieval in Cascade (poll trajectory vs. drain `StreamAgentStateUpdates`) is still unprobed and needs a live call through the user's account.
