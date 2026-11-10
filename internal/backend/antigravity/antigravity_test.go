@@ -163,6 +163,17 @@ func TestCompleteRejectsPermissionRequests(t *testing.T) {
 	}
 }
 
+func TestCompleteRefusesAgentFileReads(t *testing.T) {
+	b, _ := newFake(t, "fsread")
+	resp, err := b.Complete(context.Background(), backend.Request{Model: "gemini-3.8-pro", Messages: userMsg("read a file")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Content != "fs=-32601" {
+		t.Fatalf("Content = %q, want Method not found (-32601)", resp.Content)
+	}
+}
+
 func TestCompleteMapsMaxTokensToLength(t *testing.T) {
 	b, _ := newFake(t, "maxtokens")
 	resp, err := b.Complete(context.Background(), backend.Request{Model: "gemini-3.8-pro", Messages: userMsg("x")})

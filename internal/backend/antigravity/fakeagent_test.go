@@ -38,6 +38,7 @@ func TestMain(m *testing.M) {
 //	ok         echo "model=<m>;" and "prompt=<text>" as two chunks, end_turn
 //	auth       session/new fails with -32000 Authentication required
 //	permission ask session/request_permission, echo the outcome, end_turn
+//	fsread     ask fs/read_text_file, echo the error code, end_turn
 //	hang       never finish the turn until session/cancel, then "cancelled"
 //	maxtokens  one chunk, then stopReason max_tokens
 //	die-once   exit on the first prompt of the first process, then behave as ok
@@ -274,6 +275,22 @@ func (f *fakeAgent) prompt(id any, params map[string]any) {
 		result, _ := resp["result"].(map[string]any)
 		outcome, _ := result["outcome"].(map[string]any)
 		f.chunk(sess, fmt.Sprintf("outcome=%v/%v", outcome["outcome"], outcome["optionId"]))
+		f.reply(id, map[string]any{"stopReason": "end_turn"})
+		return
+	case "fsread":
+		// subpipe advertised no fs capability, so it must refuse this.
+		f.mu.Lock()
+		f.nextReq++
+		reqID := fmt.Sprintf("fs-%d", f.nextReq)
+		ch := make(chan map[string]any, 1)
+		f.replies[reqID] = ch
+		f.mu.Unlock()
+		f.send(map[string]any{"id": reqID, "method": "fs/read_text_file", "params": map[string]any{
+			"sessionId": sess, "path": "/etc/passwd",
+		}})
+		resp := <-ch
+		errObj, _ := resp["error"].(map[string]any)
+		f.chunk(sess, fmt.Sprintf("fs=%v", errObj["code"]))
 		f.reply(id, map[string]any{"stopReason": "end_turn"})
 		return
 	case "maxtokens":
