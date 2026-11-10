@@ -46,6 +46,11 @@ more capable.
   - discuss.ai.google.dev topic 197943: a user reports a ban after another local
     program launched the official `agy.exe` headless.
 
+**Alternative surface:** the official CLI ships an ACP server (`agy acp`), used
+by `pi-antigravity-bridge` (section 7). It is documented for editors, which makes
+it more stable than the internal `language_server.exe` ConnectRPC API. It does
+not change the policy question.
+
 **Implication:** the current `antigravity` backend drives the official binary,
 but the policy forbids wrapping that binary from a third-party application on
 consumer plans. Using the official binary avoids traffic fingerprinting. It does
@@ -257,7 +262,57 @@ control than the adapters.
 
 ---
 
-## 7. Go SDK references
+## 7. Community bridges that use the same approach
+
+These are not vendor-official. They matter because they already do what
+subpipe proposes (drive the official unmodified binary under the user's own
+login) and they are widely used.
+
+| Package | Drives | Protocol | Auth |
+|---|---|---|---|
+| `pi-claude-bridge` (elidickinson, MIT; 82.5K downloads/month) https://pi.dev/packages/pi-claude-bridge | Claude Code via the TypeScript Agent SDK | stream-json control protocol | Claude subscription (`claude auth login`) |
+| `@estebanforge/pi-antigravity-bridge` (MIT) https://pi.dev/packages/@estebanforge/pi-antigravity-bridge, source in https://github.com/EstebanForge/pi-extensions | `agy acp` (default) or a persistent stream-json `agy` | ACP over stdio; stream-json fallback | Antigravity subscription (agy's own OAuth) |
+| `@estebanforge/pi-ask-codex` | `codex exec --json` (one-shot, `codex exec resume <id>`) | JSONL | Codex login |
+| `@estebanforge/pi-ask-claude` | `claude -p --output-format stream-json --verbose` | JSONL | Claude login or API key |
+
+Technical takeaways:
+
+- `agy acp` is an ACP server built into the official Antigravity CLI. The
+  bridge reports text streaming, exact token usage, `session/load` resume and
+  cancellation as verified on agy 1.5.3. It is a public, documented surface,
+  unlike the internal `language_server.exe` ConnectRPC API that subpipe uses
+  today. **UNVERIFIED** against Google's own docs, but the Antigravity docs
+  list "Other editors (ACP)".
+- Both bridges keep one persistent client process and bind each host session to
+  the client's own conversation id, sending only the latest user message per
+  turn.
+- `pi-claude-bridge` refuses turns whose system prompt contains its host's
+  built-in prompt, "since Anthropic may otherwise bill these requests as Extra
+  Usage". Anthropic classifies third-party harness traffic from request content,
+  not only from the binary.
+
+Policy reasoning in these packages:
+
+- pi-antigravity-bridge "Terms of Service notice": it argues that Terms §6
+  targets token-reuse tools that call Google's backend directly, and that a
+  spawned official binary is indistinguishable server-side. Its own conclusion:
+  "practical risk is low, near zero. But not zero … Grey area." The notice
+  quotes Terms §6. It does not address the FAQ sentence in 1.1, which names
+  "wrapping agy inside third-party coding agents or applications" directly, or
+  the forum report of a ban caused by a headless `agy.exe` launched by another
+  program.
+- Anthropic Help Center,
+  https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan:
+  "Update June 15, 2026: We've paused the previously-announced changes to
+  Claude Agent SDK usage. For now, nothing has changed: Claude Agent SDK,
+  claude -p, and third-party app usage still draw from your subscription
+  limits." The October 7, 2026 update adds monthly API credits to Max, Ultra
+  and Team plans for API-key use of the Agent SDK and `claude -p`. This
+  describes billing; it does not override the developer rule in 2.4.
+
+---
+
+## 8. Go SDK references
 
 - `github.com/anthropics/anthropic-sdk-go/v2`: typed SSE streaming
   (`Messages.NewStreaming`, `ContentBlockDeltaEvent`/`TextDelta`), requires
