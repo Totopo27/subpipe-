@@ -29,9 +29,11 @@ type Request struct {
 	Messages []Message
 }
 
-// Response is the result of a unary completion.
+// Response is the result of a unary completion. FinishReason uses OpenAI
+// values: "stop", "length" or "content_filter".
 type Response struct {
-	Content string
+	Content      string
+	FinishReason string
 }
 
 // Model is one catalogue entry.

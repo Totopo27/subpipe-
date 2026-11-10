@@ -20,7 +20,7 @@ Branch: `feat/backend-modules` (base `34768b7`). Delivery: ask-on-risk. Test run
 - [x] T3 — S2, S4, S5: `internal/backend` contract (`Backend` interface) + `Registry` prefix routing with tests (RED: undefined Model/Request → GREEN). Route: inline. Commit `df6fa0f`.
 - [x] T4 — S6: re-scope tickets 02–04 and spec module list to the backend layout. Route: inline. Commit `df6fa0f`.
 - [x] T5 — S3, S7: revise ADR 0001 (and ADR 0002, GLOSSARY, README, spec, tickets 01–04, references) for `agy acp`. Route: inline. Commit: see Log L11.
-- [ ] T6 — S4, S6: ACP client + `antigravity.Backend` over a persistent `agy acp` child; replaces the `language_server.exe` supervisor. Tested against a fake ACP agent. Route: inline.
+- [x] T6 — S4, S6: ACP client + `antigravity.Backend` over a persistent `agy acp` child; replaces the `language_server.exe` supervisor. Tested against a fake ACP agent. Route: inline. RED: `undefined: Backend/New/Config/ErrAuthRequired` → GREEN (`go test -count=5`, `-race -count=2`). Commit: see L11.
 - [ ] T7 — S5, S6: `internal/server` `POST /v1/chat/completions` (unary) + `cmd/subpipe` wiring on `127.0.0.1:9099`. Route: inline (depends on T6; no writer reason).
 
 ## Log
