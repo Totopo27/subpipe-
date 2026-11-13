@@ -61,12 +61,24 @@ go run ./cmd/subpipe -addr 127.0.0.1:9100 -agy "C:\Program Files\Antigravity\agy
 | `-addr` | `127.0.0.1:9099` | Dirección de escucha. |
 | `-agy` | `agy` | Ruta al binario `agy` (admite espacios); subpipe lo lanza como `<agy> acp`. Su stderr se reenvía al stderr de subpipe. |
 | `-workdir` | `<temp>/subpipe-antigravity` | Directorio de trabajo de las sesiones de `agy`. |
+| `-config-dir` | (vacío o `GEMINI_DIR`/`AGY_CONFIG_DIR`) | Directorio de perfil/configuración para aislar credenciales entre instancias multi-cuenta. |
+| `-watchdog` | `true` | Reinicia automáticamente el subproceso si termina inesperadamente. |
 
-Estado: `POST /v1/chat/completions` unario y streaming SSE (`stream: true`). `/v1/models` y `/healthz` llegan en el ticket 04.
+Endpoints disponibles:
+- `POST /v1/chat/completions`: unario (`stream: false`) y streaming SSE (`stream: true`).
+- `GET /v1/models`: lista el catálogo de modelos prefijados (`antigravity/gemini-3.8-pro`, etc.).
+- `GET /healthz`: reporte de salud del gateway y del subproceso (vivo, inicializado, autenticado).
 
 ```bash
+# Chat unario
 curl http://127.0.0.1:9099/v1/chat/completions -H "Content-Type: application/json" \
   -d '{"model":"antigravity/gemini-3.8-pro","messages":[{"role":"user","content":"hola"}]}'
+
+# Catálogo de modelos
+curl http://127.0.0.1:9099/v1/models
+
+# Chequeo de salud
+curl http://127.0.0.1:9099/healthz
 ```
 
 ---

@@ -425,3 +425,83 @@ func TestStreamClientErrorStopsAndCancels(t *testing.T) {
 	}
 	waitEvent(t, logPath, "cancel sess_1")
 }
+
+func TestHealthReportsSubprocessStatus(t *testing.T) {
+	b, _ := newFake(t, "ok")
+	h, err := b.Health(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !h.Alive || !h.Initialized || !h.Authenticated {
+		t.Fatalf("unexpected health: %+v", h)
+	}
+
+	bAuth, _ := newFake(t, "auth")
+	hAuth, _ := bAuth.Health(context.Background())
+	if !hAuth.Alive || !hAuth.Initialized || hAuth.Authenticated {
+		t.Fatalf("expected unauthenticated health, got: %+v", hAuth)
+	}
+}
+
+func TestModelsDiscoveredDynamicallyFromSessionNew(t *testing.T) {
+	b, _ := newFake(t, "ok")
+	ms, err := b.Models(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ms) != 2 || ms[0].ID != "gemini-3.8-pro" || ms[1].ID != "gemini-3.8-flash" {
+		t.Fatalf("discovered models = %+v", ms)
+	}
+}
+
+func TestWatchdogRespawnsDeadSubprocess(t *testing.T) {
+	b, logPath := newFake(t, "ok")
+	b.cfg.Watchdog = true
+	h, err := b.Health(context.Background())
+	if err != nil || !h.Alive {
+		t.Fatalf("initial health = %+v, err = %v", h, err)
+	}
+	oldConn := b.conn
+
+	// Kill child
+	_ = oldConn.cmd.Process.Kill()
+	waitEvent(t, logPath, "start")
+
+	// Wait for watchdog to auto-respawn
+	deadline := time.Now().Add(5 * time.Second)
+	respawned := false
+	for time.Now().Before(deadline) {
+		b.mu.Lock()
+		newConn := b.conn
+		b.mu.Unlock()
+		if newConn != nil && newConn != oldConn && newConn.alive() {
+			respawned = true
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !respawned {
+		t.Fatal("watchdog did not auto-respawn child process")
+	}
+}
+
+func TestConfigDirSetsProfileEnvironment(t *testing.T) {
+	profileDir := filepath.Join(t.TempDir(), "custom-profile")
+	cfg := Config{
+		ConfigDir: profileDir,
+	}
+	env := cfg.childEnv()
+	foundGemini := false
+	foundAgy := false
+	for _, e := range env {
+		if strings.HasPrefix(e, "GEMINI_DIR=") && strings.HasSuffix(e, profileDir) {
+			foundGemini = true
+		}
+		if strings.HasPrefix(e, "AGY_CONFIG_DIR=") && strings.HasSuffix(e, profileDir) {
+			foundAgy = true
+		}
+	}
+	if !foundGemini || !foundAgy {
+		t.Fatalf("env missing profile dir: %v", env)
+	}
+}

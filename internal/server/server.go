@@ -24,6 +24,8 @@ func New(reg *backend.Registry) http.Handler {
 	s := &server{reg: reg, now: time.Now}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/chat/completions", s.chatCompletions)
+	mux.HandleFunc("GET /v1/models", s.models)
+	mux.HandleFunc("GET /healthz", s.healthz)
 	return mux
 }
 
@@ -217,6 +219,49 @@ func (s *server) streamChatCompletions(w http.ResponseWriter, r *http.Request, r
 	ensureHeaders()
 	_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 	flusher.Flush()
+}
+
+func (s *server) models(w http.ResponseWriter, r *http.Request) {
+	ms, err := s.reg.Models(r.Context())
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "models: "+err.Error(), "", "")
+		return
+	}
+	now := s.now().Unix()
+	data := make([]map[string]any, len(ms))
+	for i, m := range ms {
+		data[i] = map[string]any{
+			"id":       m.ID,
+			"object":   "model",
+			"created":  now,
+			"owned_by": m.OwnedBy,
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"object": "list",
+		"data":   data,
+	})
+}
+
+func (s *server) healthz(w http.ResponseWriter, r *http.Request) {
+	h, err := s.reg.Health(r.Context())
+	status := "ok"
+	httpCode := http.StatusOK
+	if err != nil {
+		status = "degraded"
+		httpCode = http.StatusServiceUnavailable
+	}
+	for _, b := range h {
+		if !b.Alive {
+			status = "degraded"
+			httpCode = http.StatusServiceUnavailable
+			break
+		}
+	}
+	writeJSON(w, httpCode, map[string]any{
+		"status":   status,
+		"backends": h,
+	})
 }
 
 func writeSSE(w http.ResponseWriter, flusher http.Flusher, v any) error {

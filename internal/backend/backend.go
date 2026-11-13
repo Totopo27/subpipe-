@@ -50,6 +50,14 @@ type Model struct {
 	OwnedBy string
 }
 
+// Health holds status information for one backend.
+type Health struct {
+	Alive         bool   `json:"alive"`
+	Initialized   bool   `json:"initialized"`
+	Authenticated bool   `json:"authenticated"`
+	Details       string `json:"details,omitempty"`
+}
+
 // Backend drives one vendor's official local client.
 type Backend interface {
 	// Name is the routing prefix; it must be non-empty and contain no "/".
@@ -61,6 +69,8 @@ type Backend interface {
 	// Stream runs a streaming chat completion, calling onChunk for each
 	// incoming token fragment and once at the end with FinishReason.
 	Stream(ctx context.Context, req Request, onChunk func(StreamChunk) error) error
+	// Health reports the current status of the backend.
+	Health(ctx context.Context) (Health, error)
 }
 
 // Registry routes prefixed model ids to registered backends.
@@ -111,6 +121,26 @@ func (r *Registry) Models(ctx context.Context) ([]Model, error) {
 		for _, m := range ms {
 			out = append(out, Model{ID: b.Name() + "/" + m.ID, OwnedBy: b.Name()})
 		}
+	}
+	return out, nil
+}
+
+// Health returns health status for all registered backends.
+func (r *Registry) Health(ctx context.Context) (map[string]Health, error) {
+	out := make(map[string]Health, len(r.order))
+	var errs []error
+	for _, b := range r.order {
+		h, err := b.Health(ctx)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", b.Name(), err))
+			if h.Details == "" {
+				h.Details = err.Error()
+			}
+		}
+		out[b.Name()] = h
+	}
+	if len(errs) > 0 {
+		return out, errors.Join(errs...)
 	}
 	return out, nil
 }

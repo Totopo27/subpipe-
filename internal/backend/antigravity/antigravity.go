@@ -38,11 +38,31 @@ type Config struct {
 	// WorkDir is the child's working directory and the cwd of every ACP
 	// session; empty means <os.TempDir()>/subpipe-antigravity.
 	WorkDir string
+	// ConfigDir isolates the user profile and credentials directory.
+	ConfigDir string
 	// Models overrides DefaultModels.
 	Models []string
 	// Stderr receives the child's stderr (ACP reserves it for logging);
 	// nil discards it.
 	Stderr io.Writer
+	// Watchdog enables automatic background respawn if the child exits.
+	Watchdog bool
+}
+
+func (cfg Config) childEnv() []string {
+	var env []string
+	if cfg.ConfigDir != "" {
+		abs, err := filepath.Abs(cfg.ConfigDir)
+		if err == nil {
+			env = append(env,
+				"GEMINI_DIR="+abs,
+				"AGY_CONFIG_DIR="+abs,
+				"ANTIGRAVITY_CONFIG_DIR="+abs,
+			)
+		}
+	}
+	env = append(env, cfg.Env...)
+	return env
 }
 
 // Backend implements backend.Backend over a persistent `agy acp` child.
@@ -52,6 +72,11 @@ type Backend struct {
 	mu       sync.Mutex
 	conn     *conn
 	canClose bool // agent advertised sessionCapabilities.close
+	closing  bool
+
+	authenticated    bool
+	authChecked      bool
+	discoveredModels []string
 }
 
 // New returns a backend; the child is started lazily by the first request.
@@ -71,18 +96,71 @@ func New(cfg Config) *Backend {
 // Name is the routing prefix.
 func (b *Backend) Name() string { return "antigravity" }
 
-// Models lists the configured catalogue.
-func (b *Backend) Models(context.Context) ([]backend.Model, error) {
-	out := make([]backend.Model, len(b.cfg.Models))
-	for i, id := range b.cfg.Models {
+// Models lists the catalogue, discovered dynamically from session/new or
+// falling back to configured defaults.
+func (b *Backend) Models(ctx context.Context) ([]backend.Model, error) {
+	b.mu.Lock()
+	models := b.discoveredModels
+	b.mu.Unlock()
+
+	if len(models) == 0 {
+		_ = b.probe(ctx)
+		b.mu.Lock()
+		models = b.discoveredModels
+		b.mu.Unlock()
+	}
+
+	if len(models) == 0 {
+		models = b.cfg.Models
+	}
+
+	out := make([]backend.Model, len(models))
+	for i, id := range models {
 		out[i] = backend.Model{ID: id, OwnedBy: b.Name()}
 	}
 	return out, nil
 }
 
+// Health reports subprocess liveness, initialization, and auth status.
+func (b *Backend) Health(ctx context.Context) (backend.Health, error) {
+	b.mu.Lock()
+	c := b.conn
+	alive := c != nil && c.alive()
+	authChecked := b.authChecked
+	authenticated := b.authenticated
+	b.mu.Unlock()
+
+	if !alive {
+		var err error
+		c, _, err = b.connection(ctx)
+		if err != nil {
+			return backend.Health{
+				Alive:         false,
+				Initialized:   false,
+				Authenticated: false,
+				Details:       err.Error(),
+			}, err
+		}
+	}
+
+	if !authChecked {
+		_ = b.probe(ctx)
+		b.mu.Lock()
+		authenticated = b.authenticated
+		b.mu.Unlock()
+	}
+
+	return backend.Health{
+		Alive:         true,
+		Initialized:   true,
+		Authenticated: authenticated,
+	}, nil
+}
+
 // Close stops the child, if any.
 func (b *Backend) Close() error {
 	b.mu.Lock()
+	b.closing = true
 	c := b.conn
 	b.conn = nil
 	b.mu.Unlock()
@@ -109,7 +187,7 @@ func (b *Backend) connection(ctx context.Context) (*conn, bool, error) {
 		return nil, false, err
 	}
 	b.cfg.WorkDir = abs
-	c, err := startConn(b.cfg.Command, b.cfg.Env, abs, b.cfg.Stderr)
+	c, err := startConn(b.cfg.Command, b.cfg.childEnv(), abs, b.cfg.Stderr)
 	if err != nil {
 		return nil, false, err
 	}
@@ -139,7 +217,73 @@ func (b *Backend) connection(ctx context.Context) (*conn, bool, error) {
 	}
 	b.conn = c
 	b.canClose = init.AgentCapabilities.SessionCapabilities.Close != nil
+	if b.cfg.Watchdog {
+		go b.watchConn(c)
+	}
 	return c, b.canClose, nil
+}
+
+func (b *Backend) watchConn(c *conn) {
+	<-c.done
+	b.mu.Lock()
+	closing := b.closing
+	isCurrent := (b.conn == c)
+	if isCurrent {
+		b.conn = nil
+	}
+	b.mu.Unlock()
+	if !closing && isCurrent {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_, _, _ = b.connection(ctx)
+	}
+}
+
+func (b *Backend) updateFromSession(opts []configOption) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.authenticated = true
+	b.authChecked = true
+	if opt, ok := modelOption(opts); ok {
+		ids := opt.modelIDs()
+		if len(ids) > 0 {
+			b.discoveredModels = ids
+		}
+	}
+}
+
+func (b *Backend) markAuthRequired() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.authenticated = false
+	b.authChecked = true
+}
+
+func (b *Backend) probe(ctx context.Context) error {
+	c, canClose, err := b.connection(ctx)
+	if err != nil {
+		return err
+	}
+	var sess struct {
+		SessionID     string         `json:"sessionId"`
+		ConfigOptions []configOption `json:"configOptions"`
+	}
+	err = c.call(ctx, "session/new", map[string]any{"cwd": b.cfg.WorkDir, "mcpServers": []any{}}, &sess)
+	if err != nil {
+		var rpcErr *RPCError
+		if errors.As(err, &rpcErr) && rpcErr.Code == codeAuthRequired {
+			b.markAuthRequired()
+			return fmt.Errorf("%w (%v)", ErrAuthRequired, err)
+		}
+		return fmt.Errorf("session/new probe: %w", err)
+	}
+	b.updateFromSession(sess.ConfigOptions)
+	if canClose {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = c.call(closeCtx, "session/close", map[string]any{"sessionId": sess.SessionID}, nil)
+	}
+	return nil
 }
 
 // configOption is the subset of an ACP SessionConfigOption subpipe reads.
@@ -169,6 +313,21 @@ func (o configOption) offers(value string) bool {
 		}
 	}
 	return false
+}
+
+func (o configOption) modelIDs() []string {
+	var ids []string
+	for _, v := range o.Options {
+		if v.Value != "" {
+			ids = append(ids, v.Value)
+		}
+		for _, g := range v.Options {
+			if g.Value != "" {
+				ids = append(ids, g.Value)
+			}
+		}
+	}
+	return ids
 }
 
 // modelOption finds the model selector: category "model", else id "model".
@@ -201,10 +360,12 @@ func (b *Backend) Complete(ctx context.Context, req backend.Request) (backend.Re
 	if err != nil {
 		var rpcErr *RPCError
 		if errors.As(err, &rpcErr) && rpcErr.Code == codeAuthRequired {
+			b.markAuthRequired()
 			return backend.Response{}, fmt.Errorf("%w (%v)", ErrAuthRequired, err)
 		}
 		return backend.Response{}, fmt.Errorf("session/new: %w", err)
 	}
+	b.updateFromSession(sess.ConfigOptions)
 	if canClose {
 		defer func() {
 			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -257,10 +418,12 @@ func (b *Backend) Stream(ctx context.Context, req backend.Request, onChunk func(
 	if err != nil {
 		var rpcErr *RPCError
 		if errors.As(err, &rpcErr) && rpcErr.Code == codeAuthRequired {
+			b.markAuthRequired()
 			return fmt.Errorf("%w (%v)", ErrAuthRequired, err)
 		}
 		return fmt.Errorf("session/new: %w", err)
 	}
+	b.updateFromSession(sess.ConfigOptions)
 	if canClose {
 		defer func() {
 			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

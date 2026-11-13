@@ -39,6 +39,12 @@ func (f *fakeBackend) Stream(_ context.Context, r backend.Request, onChunk func(
 	}
 	return nil
 }
+func (f *fakeBackend) Health(_ context.Context) (backend.Health, error) {
+	if f.err != nil {
+		return backend.Health{Alive: false, Details: f.err.Error()}, f.err
+	}
+	return backend.Health{Alive: true, Initialized: true, Authenticated: true}, nil
+}
 
 func newServer(t *testing.T, fb *fakeBackend) http.Handler {
 	t.Helper()
@@ -240,6 +246,113 @@ func TestChatCompletionStreamBackendErrorReturns502(t *testing.T) {
 	e := decodeError(t, rec)
 	if !strings.Contains(e.Error.Message, "backend failed") {
 		t.Fatalf("error message = %q", e.Error.Message)
+	}
+}
+
+func TestModelsEndpoint(t *testing.T) {
+	fb := &fakeBackend{}
+	h := newServer(t, fb)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Fatalf("Content-Type = %q", ct)
+	}
+	var res struct {
+		Object string `json:"object"`
+		Data   []struct {
+			ID      string `json:"id"`
+			Object  string `json:"object"`
+			Created int64  `json:"created"`
+			OwnedBy string `json:"owned_by"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Object != "list" || len(res.Data) != 1 {
+		t.Fatalf("unexpected models response: %+v", res)
+	}
+	if res.Data[0].ID != "fake/m1" || res.Data[0].Object != "model" || res.Data[0].OwnedBy != "fake" || res.Data[0].Created == 0 {
+		t.Fatalf("model entry = %+v", res.Data[0])
+	}
+}
+
+func TestModelsEndpointBackendErrorReturns502(t *testing.T) {
+	fb := &fakeBackend{err: errors.New("cannot list models")}
+	// override Models to return error
+	fbModelsErr := &fakeBackendModelsErr{fakeBackend: fb}
+	reg, err := backend.NewRegistry(fbModelsErr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(reg)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rec.Code)
+	}
+	e := decodeError(t, rec)
+	if !strings.Contains(e.Error.Message, "cannot list models") {
+		t.Fatalf("error message = %q", e.Error.Message)
+	}
+}
+
+type fakeBackendModelsErr struct {
+	*fakeBackend
+}
+
+func (f *fakeBackendModelsErr) Models(context.Context) ([]backend.Model, error) {
+	return nil, errors.New("cannot list models")
+}
+
+func TestHealthzEndpointHealthy(t *testing.T) {
+	fb := &fakeBackend{}
+	h := newServer(t, fb)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body)
+	}
+	var res struct {
+		Status   string                    `json:"status"`
+		Backends map[string]backend.Health `json:"backends"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "ok" || !res.Backends["fake"].Alive {
+		t.Fatalf("unexpected healthz response: %+v", res)
+	}
+}
+
+func TestHealthzEndpointDegradedReturns503(t *testing.T) {
+	fb := &fakeBackend{err: errors.New("subprocess died")}
+	h := newServer(t, fb)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503, body %s", rec.Code, rec.Body)
+	}
+	var res struct {
+		Status   string                    `json:"status"`
+		Backends map[string]backend.Health `json:"backends"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "degraded" || res.Backends["fake"].Alive {
+		t.Fatalf("unexpected degraded response: %+v", res)
 	}
 }
 

@@ -28,6 +28,13 @@ func (f *fake) Stream(_ context.Context, r Request, onChunk func(StreamChunk) er
 	return onChunk(StreamChunk{FinishReason: "stop"})
 }
 
+func (f *fake) Health(context.Context) (Health, error) {
+	if f.name == "unhealthy" {
+		return Health{Alive: false, Details: "crashed"}, errors.New("crashed")
+	}
+	return Health{Alive: true, Initialized: true, Authenticated: true}, nil
+}
+
 func TestResolveStripsPrefix(t *testing.T) {
 	ag := &fake{name: "antigravity"}
 	r, err := NewRegistry(ag, &fake{name: "claude"})
@@ -104,5 +111,31 @@ func TestBackendStream(t *testing.T) {
 	}
 	if len(received) != 2 || received[0].Content != "chunk1" || received[1].FinishReason != "stop" {
 		t.Fatalf("unexpected stream chunks: %+v", received)
+	}
+}
+
+func TestRegistryHealth(t *testing.T) {
+	ag := &fake{name: "antigravity"}
+	cl := &fake{name: "claude"}
+	reg, err := NewRegistry(ag, cl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := reg.Health(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(h) != 2 || !h["antigravity"].Alive || !h["claude"].Alive {
+		t.Fatalf("Health = %+v", h)
+	}
+
+	bad := &fake{name: "unhealthy"}
+	regBad, _ := NewRegistry(bad)
+	hBad, errBad := regBad.Health(context.Background())
+	if errBad == nil {
+		t.Fatal("expected error for unhealthy backend")
+	}
+	if hBad["unhealthy"].Alive {
+		t.Fatalf("unhealthy backend reported alive: %+v", hBad)
 	}
 }
