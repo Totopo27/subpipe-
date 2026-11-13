@@ -15,12 +15,12 @@ Branch: `feat/models-and-resilience` (base `59c2875`). Delivery: ask-on-risk. Te
 
 ## Tasks
 
-- [x] T1 — S1, S2: `backend.Backend` health contract (`Health` struct and method), `Registry.Health`, `GET /v1/models` in `internal/server` with unit tests. Route: inline. Commit pending.
-- [x] T2 — S3: `GET /healthz` in `internal/server` with unit tests. Route: inline. Commit pending.
-- [x] T3 — S4: dynamic model extraction from `session/new` config options in `internal/backend/antigravity` with tests. Route: inline. Commit pending.
-- [x] T4 — S5: watchdog supervisor and auto-respawn on child death in `internal/backend/antigravity` with tests. Route: inline. Commit pending.
-- [x] T5 — S6: profile isolation `-config-dir` flag in `cmd/subpipe` and `Config.ConfigDir` in `internal/backend/antigravity` with tests. Route: inline. Commit pending.
-- [x] T6 — S7: verification across all packages with race detector (`go test -race ./...`) and ticket 04 update. Route: inline. Commit pending.
+- [x] T1 — S1, S2: `backend.Backend` health contract (`Health` struct and method), `Registry.Health`, `GET /v1/models` in `internal/server` with unit tests. Route: inline. Commit `67a1521`.
+- [x] T2 — S3: `GET /healthz` in `internal/server` with unit tests. Route: inline. Commit `67a1521`.
+- [x] T3 — S4: dynamic model extraction from `session/new` config options in `internal/backend/antigravity` with tests. Route: inline. Commit `67a1521`.
+- [x] T4 — S5: watchdog supervisor and auto-respawn on child death in `internal/backend/antigravity` with tests. Route: inline. Commit `67a1521`.
+- [x] T5 — S6: profile isolation `-config-dir` flag in `cmd/subpipe` and `Config.ConfigDir` in `internal/backend/antigravity` with tests. Route: inline. Commit `67a1521`.
+- [x] T6 — S7: verification across all packages with race detector (`go test -race ./...`) and ticket 04 update. Route: inline. Commit `67a1521`.
 
 ## Log
 
