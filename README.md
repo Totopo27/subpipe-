@@ -62,7 +62,7 @@ go run ./cmd/subpipe -addr 127.0.0.1:9100 -agy "C:\Program Files\Antigravity\agy
 | `-agy` | `agy` | Ruta al binario `agy` (admite espacios); subpipe lo lanza como `<agy> acp`. Su stderr se reenvía al stderr de subpipe. |
 | `-workdir` | `<temp>/subpipe-antigravity` | Directorio de trabajo de las sesiones de `agy`. |
 
-Estado: `POST /v1/chat/completions` unario (`stream: false`). `stream: true` responde 400 hasta el ticket 03; `/v1/models` y `/healthz` llegan en el ticket 04.
+Estado: `POST /v1/chat/completions` unario y streaming SSE (`stream: true`). `/v1/models` y `/healthz` llegan en el ticket 04.
 
 ```bash
 curl http://127.0.0.1:9099/v1/chat/completions -H "Content-Type: application/json" \

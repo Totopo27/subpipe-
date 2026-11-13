@@ -73,10 +73,6 @@ func (s *server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error(), "", "")
 		return
 	}
-	if req.Stream {
-		writeError(w, http.StatusBadRequest, "stream: true is not supported yet", "stream", "")
-		return
-	}
 	if len(req.Messages) == 0 {
 		writeError(w, http.StatusBadRequest, "messages must not be empty", "messages", "")
 		return
@@ -106,6 +102,11 @@ func (s *server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error(), "model", "model_not_found")
 		return
 	}
+
+	if req.Stream {
+		s.streamChatCompletions(w, r, req, b, model, msgs)
+		return
+	}
 	resp, err := b.Complete(r.Context(), backend.Request{Model: model, Messages: msgs})
 	switch {
 	case errors.Is(err, backend.ErrUnknownModel):
@@ -131,6 +132,103 @@ func (s *server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 			"finish_reason": finish,
 		}},
 	})
+}
+
+func (s *server) streamChatCompletions(w http.ResponseWriter, r *http.Request, req chatRequest, b backend.Backend, model string, msgs []backend.Message) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming not supported by server", "", "")
+		return
+	}
+
+	id := "chatcmpl-" + randomID()
+	created := s.now().Unix()
+	headerWritten := false
+
+	ensureHeaders := func() {
+		if !headerWritten {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
+			w.Header().Set("X-Accel-Buffering", "no")
+			w.WriteHeader(http.StatusOK)
+			flusher.Flush()
+			headerWritten = true
+			writeSSE(w, flusher, map[string]any{
+				"id":      id,
+				"object":  "chat.completion.chunk",
+				"created": created,
+				"model":   req.Model,
+				"choices": []any{map[string]any{
+					"index":         0,
+					"delta":         map[string]any{"role": "assistant"},
+					"finish_reason": nil,
+				}},
+			})
+		}
+	}
+
+	err := b.Stream(r.Context(), backend.Request{Model: model, Messages: msgs}, func(c backend.StreamChunk) error {
+		ensureHeaders()
+		if c.Content != "" {
+			if err := writeSSE(w, flusher, map[string]any{
+				"id":      id,
+				"object":  "chat.completion.chunk",
+				"created": created,
+				"model":   req.Model,
+				"choices": []any{map[string]any{
+					"index":         0,
+					"delta":         map[string]any{"content": c.Content},
+					"finish_reason": nil,
+				}},
+			}); err != nil {
+				return err
+			}
+		}
+		if c.FinishReason != "" {
+			if err := writeSSE(w, flusher, map[string]any{
+				"id":      id,
+				"object":  "chat.completion.chunk",
+				"created": created,
+				"model":   req.Model,
+				"choices": []any{map[string]any{
+					"index":         0,
+					"delta":         map[string]any{},
+					"finish_reason": c.FinishReason,
+				}},
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	switch {
+	case !headerWritten && errors.Is(err, backend.ErrUnknownModel):
+		writeError(w, http.StatusBadRequest, err.Error(), "model", "model_not_found")
+		return
+	case !headerWritten && err != nil:
+		writeError(w, http.StatusBadGateway, b.Name()+": "+err.Error(), "", "")
+		return
+	case err != nil:
+		return
+	}
+
+	ensureHeaders()
+	_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	flusher.Flush()
+}
+
+func writeSSE(w http.ResponseWriter, flusher http.Flusher, v any) error {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", raw); err != nil {
+		return err
+	}
+	flusher.Flush()
+	return nil
 }
 
 // writeError writes an OpenAI-style error body. Empty param or code are

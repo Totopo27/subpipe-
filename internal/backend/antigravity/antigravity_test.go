@@ -362,3 +362,66 @@ func TestModelsListsDefaultCatalogue(t *testing.T) {
 		t.Fatalf("Models = %+v", ms)
 	}
 }
+
+func TestStreamYieldsChunksAndTerminalFinishReason(t *testing.T) {
+	b, _ := newFake(t, "ok")
+	var chunks []backend.StreamChunk
+	err := b.Stream(context.Background(), backend.Request{
+		Model:    "gemini-3.8-pro",
+		Messages: userMsg("hello"),
+	}, func(c backend.StreamChunk) error {
+		chunks = append(chunks, c)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chunks) != 3 {
+		t.Fatalf("got %d chunks, want 3; chunks = %+v", len(chunks), chunks)
+	}
+	if chunks[0].Content != "model=gemini-3.8-pro;" || chunks[0].FinishReason != "" {
+		t.Errorf("chunk 0 = %+v", chunks[0])
+	}
+	if chunks[1].Content != "prompt=hello" || chunks[1].FinishReason != "" {
+		t.Errorf("chunk 1 = %+v", chunks[1])
+	}
+	if chunks[2].Content != "" || chunks[2].FinishReason != "stop" {
+		t.Errorf("chunk 2 = %+v", chunks[2])
+	}
+}
+
+func TestStreamCancelSendsSessionCancel(t *testing.T) {
+	b, logPath := newFake(t, "hang")
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- b.Stream(ctx, backend.Request{
+			Model:    "gemini-3.8-pro",
+			Messages: userMsg("slow"),
+		}, func(c backend.StreamChunk) error {
+			return nil
+		})
+	}()
+	waitEvent(t, logPath, "prompt sess_1")
+	cancel()
+	err := <-errCh
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Stream err = %v, want context.Canceled", err)
+	}
+	waitEvent(t, logPath, "cancel sess_1")
+}
+
+func TestStreamClientErrorStopsAndCancels(t *testing.T) {
+	b, logPath := newFake(t, "ok")
+	clientErr := errors.New("client disconnected")
+	err := b.Stream(context.Background(), backend.Request{
+		Model:    "gemini-3.8-pro",
+		Messages: userMsg("hello"),
+	}, func(c backend.StreamChunk) error {
+		return clientErr
+	})
+	if !errors.Is(err, clientErr) {
+		t.Fatalf("Stream err = %v, want %v", err, clientErr)
+	}
+	waitEvent(t, logPath, "cancel sess_1")
+}

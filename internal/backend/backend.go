@@ -36,6 +36,14 @@ type Response struct {
 	FinishReason string
 }
 
+// StreamChunk is one incremental event yielded during streaming. Content
+// holds a partial text fragment. FinishReason is set only on the terminal
+// chunk ("stop", "length", "content_filter"); it is empty while streaming.
+type StreamChunk struct {
+	Content      string
+	FinishReason string
+}
+
 // Model is one catalogue entry.
 type Model struct {
 	ID      string
@@ -50,6 +58,9 @@ type Backend interface {
 	Models(ctx context.Context) ([]Model, error)
 	// Complete runs a unary chat completion.
 	Complete(ctx context.Context, req Request) (Response, error)
+	// Stream runs a streaming chat completion, calling onChunk for each
+	// incoming token fragment and once at the end with FinishReason.
+	Stream(ctx context.Context, req Request, onChunk func(StreamChunk) error) error
 }
 
 // Registry routes prefixed model ids to registered backends.

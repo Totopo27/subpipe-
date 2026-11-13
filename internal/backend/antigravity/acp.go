@@ -63,14 +63,36 @@ type conn struct {
 
 // turn accumulates the agent's text for one in-flight session/prompt.
 type turn struct {
-	mu   sync.Mutex
-	text []byte
+	mu     sync.Mutex
+	text   []byte
+	chunks chan string
+	done   chan struct{}
 }
 
 func (t *turn) append(s string) {
 	t.mu.Lock()
 	t.text = append(t.text, s...)
+	ch := t.chunks
+	done := t.done
 	t.mu.Unlock()
+	if ch != nil {
+		select {
+		case ch <- s:
+		case <-done:
+		}
+	}
+}
+
+func (t *turn) stop() {
+	if t.done != nil {
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		select {
+		case <-t.done:
+		default:
+			close(t.done)
+		}
+	}
 }
 
 func (t *turn) String() string {
@@ -144,6 +166,10 @@ func (c *conn) readLoop(stdout io.Reader) {
 	for id, ch := range c.pending {
 		close(ch)
 		delete(c.pending, id)
+	}
+	for sess, t := range c.turns {
+		t.stop()
+		delete(c.turns, sess)
 	}
 	c.mu.Unlock()
 }
@@ -338,10 +364,25 @@ func (c *conn) track(session string) *turn {
 	return t
 }
 
+func (c *conn) trackStream(session string, bufSize int) *turn {
+	t := &turn{
+		chunks: make(chan string, bufSize),
+		done:   make(chan struct{}),
+	}
+	c.mu.Lock()
+	c.turns[session] = t
+	c.mu.Unlock()
+	return t
+}
+
 func (c *conn) untrack(session string) {
 	c.mu.Lock()
+	t := c.turns[session]
 	delete(c.turns, session)
 	c.mu.Unlock()
+	if t != nil {
+		t.stop()
+	}
 }
 
 // close ends stdin (the ACP way to stop an agent) and kills the child if it

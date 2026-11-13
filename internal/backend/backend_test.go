@@ -20,6 +20,14 @@ func (f *fake) Complete(_ context.Context, r Request) (Response, error) {
 	return Response{Content: "ok from " + f.name}, nil
 }
 
+func (f *fake) Stream(_ context.Context, r Request, onChunk func(StreamChunk) error) error {
+	f.got = r
+	if err := onChunk(StreamChunk{Content: "chunk1"}); err != nil {
+		return err
+	}
+	return onChunk(StreamChunk{FinishReason: "stop"})
+}
+
 func TestResolveStripsPrefix(t *testing.T) {
 	ag := &fake{name: "antigravity"}
 	r, err := NewRegistry(ag, &fake{name: "claude"})
@@ -81,5 +89,20 @@ func TestNewRegistryRejectsBadNames(t *testing.T) {
 		if _, err := NewRegistry(bs...); err == nil {
 			t.Errorf("case %d: NewRegistry succeeded, want error", i)
 		}
+	}
+}
+
+func TestBackendStream(t *testing.T) {
+	ag := &fake{name: "antigravity"}
+	var received []StreamChunk
+	err := ag.Stream(context.Background(), Request{Model: "gemini-3.8-pro"}, func(c StreamChunk) error {
+		received = append(received, c)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(received) != 2 || received[0].Content != "chunk1" || received[1].FinishReason != "stop" {
+		t.Fatalf("unexpected stream chunks: %+v", received)
 	}
 }

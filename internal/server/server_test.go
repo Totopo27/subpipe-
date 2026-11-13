@@ -13,9 +13,10 @@ import (
 )
 
 type fakeBackend struct {
-	got  backend.Request
-	resp backend.Response
-	err  error
+	got    backend.Request
+	resp   backend.Response
+	err    error
+	stream []backend.StreamChunk
 }
 
 func (f *fakeBackend) Name() string { return "fake" }
@@ -25,6 +26,18 @@ func (f *fakeBackend) Models(context.Context) ([]backend.Model, error) {
 func (f *fakeBackend) Complete(_ context.Context, r backend.Request) (backend.Response, error) {
 	f.got = r
 	return f.resp, f.err
+}
+func (f *fakeBackend) Stream(_ context.Context, r backend.Request, onChunk func(backend.StreamChunk) error) error {
+	f.got = r
+	if f.err != nil {
+		return f.err
+	}
+	for _, c := range f.stream {
+		if err := onChunk(c); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func newServer(t *testing.T, fb *fakeBackend) http.Handler {
@@ -146,13 +159,87 @@ func TestBackendUnknownModelIs400(t *testing.T) {
 	}
 }
 
-func TestStreamTrueIs400UntilTicket03(t *testing.T) {
-	rec := post(newServer(t, &fakeBackend{}), `{"model":"fake/m1","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d", rec.Code)
+func TestChatCompletionStreamSuccess(t *testing.T) {
+	fb := &fakeBackend{
+		stream: []backend.StreamChunk{
+			{Content: "hello "},
+			{Content: "world"},
+			{FinishReason: "stop"},
+		},
 	}
-	if e := decodeError(t, rec); e.Error.Param == nil || *e.Error.Param != "stream" {
-		t.Fatalf("error = %s", rec.Body)
+	rec := post(newServer(t, fb), `{"model":"fake/m1","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/event-stream") {
+		t.Fatalf("Content-Type = %q, want text/event-stream", ct)
+	}
+	if cc := rec.Header().Get("Cache-Control"); !strings.Contains(cc, "no-cache") {
+		t.Fatalf("Cache-Control = %q, want no-cache", cc)
+	}
+
+	lines := strings.Split(rec.Body.String(), "\n")
+	var dataLines []string
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if strings.HasPrefix(l, "data: ") {
+			dataLines = append(dataLines, strings.TrimPrefix(l, "data: "))
+		}
+	}
+	if len(dataLines) < 3 {
+		t.Fatalf("not enough data lines (%d): %q", len(dataLines), rec.Body.String())
+	}
+	if dataLines[len(dataLines)-1] != "[DONE]" {
+		t.Fatalf("last data line = %q, want [DONE]", dataLines[len(dataLines)-1])
+	}
+
+	// Verify chunks before [DONE]
+	var combinedText strings.Builder
+	var gotFinish string
+	for _, raw := range dataLines[:len(dataLines)-1] {
+		var chunk struct {
+			ID      string `json:"id"`
+			Object  string `json:"object"`
+			Model   string `json:"model"`
+			Choices []struct {
+				Index int `json:"index"`
+				Delta struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				} `json:"delta"`
+				FinishReason *string `json:"finish_reason"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(raw), &chunk); err != nil {
+			t.Fatalf("chunk is not JSON: %v, raw: %s", err, raw)
+		}
+		if !strings.HasPrefix(chunk.ID, "chatcmpl-") || chunk.Object != "chat.completion.chunk" || chunk.Model != "fake/m1" {
+			t.Fatalf("unexpected chunk envelope: %+v", chunk)
+		}
+		if len(chunk.Choices) > 0 {
+			combinedText.WriteString(chunk.Choices[0].Delta.Content)
+			if chunk.Choices[0].FinishReason != nil {
+				gotFinish = *chunk.Choices[0].FinishReason
+			}
+		}
+	}
+	if combinedText.String() != "hello world" {
+		t.Fatalf("combined text = %q, want 'hello world'", combinedText.String())
+	}
+	if gotFinish != "stop" {
+		t.Fatalf("finish_reason = %q, want 'stop'", gotFinish)
+	}
+}
+
+func TestChatCompletionStreamBackendErrorReturns502(t *testing.T) {
+	fb := &fakeBackend{err: errors.New("backend failed")}
+	rec := post(newServer(t, fb), `{"model":"fake/m1","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502, body %s", rec.Code, rec.Body)
+	}
+	e := decodeError(t, rec)
+	if !strings.Contains(e.Error.Message, "backend failed") {
+		t.Fatalf("error message = %q", e.Error.Message)
 	}
 }
 

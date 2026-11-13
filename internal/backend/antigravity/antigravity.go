@@ -240,6 +240,96 @@ func (b *Backend) Complete(ctx context.Context, req backend.Request) (backend.Re
 	return backend.Response{Content: t.String(), FinishReason: finish}, nil
 }
 
+// Stream runs one prompt turn in a fresh ACP session, streaming text chunks
+// progressively to onChunk as they arrive from the agent, and calling
+// onChunk once at the end with the mapped FinishReason.
+func (b *Backend) Stream(ctx context.Context, req backend.Request, onChunk func(backend.StreamChunk) error) error {
+	c, canClose, err := b.connection(ctx)
+	if err != nil {
+		return err
+	}
+
+	var sess struct {
+		SessionID     string         `json:"sessionId"`
+		ConfigOptions []configOption `json:"configOptions"`
+	}
+	err = c.call(ctx, "session/new", map[string]any{"cwd": b.cfg.WorkDir, "mcpServers": []any{}}, &sess)
+	if err != nil {
+		var rpcErr *RPCError
+		if errors.As(err, &rpcErr) && rpcErr.Code == codeAuthRequired {
+			return fmt.Errorf("%w (%v)", ErrAuthRequired, err)
+		}
+		return fmt.Errorf("session/new: %w", err)
+	}
+	if canClose {
+		defer func() {
+			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = c.call(closeCtx, "session/close", map[string]any{"sessionId": sess.SessionID}, nil)
+		}()
+	}
+
+	if err := b.selectModel(ctx, c, sess.SessionID, sess.ConfigOptions, req.Model); err != nil {
+		return err
+	}
+
+	t := c.trackStream(sess.SessionID, 256)
+	defer c.untrack(sess.SessionID)
+
+	type promptResult struct {
+		stopReason string
+		err        error
+	}
+	promptDone := make(chan promptResult, 1)
+	go func() {
+		var result struct {
+			StopReason string `json:"stopReason"`
+		}
+		err := c.call(ctx, "session/prompt", map[string]any{
+			"sessionId": sess.SessionID,
+			"prompt":    []any{map[string]any{"type": "text", "text": flatten(req.Messages)}},
+		}, &result)
+		promptDone <- promptResult{stopReason: result.StopReason, err: err}
+	}()
+
+	for {
+		select {
+		case chunk := <-t.chunks:
+			if err := onChunk(backend.StreamChunk{Content: chunk}); err != nil {
+				_ = c.notify("session/cancel", map[string]any{"sessionId": sess.SessionID})
+				return err
+			}
+		case res := <-promptDone:
+			for {
+				select {
+				case chunk := <-t.chunks:
+					if err := onChunk(backend.StreamChunk{Content: chunk}); err != nil {
+						return err
+					}
+				default:
+					goto drained
+				}
+			}
+		drained:
+			if res.err != nil {
+				if ctx.Err() != nil {
+					_ = c.notify("session/cancel", map[string]any{"sessionId": sess.SessionID})
+					return ctx.Err()
+				}
+				return fmt.Errorf("session/prompt: %w", res.err)
+			}
+			finish, err := finishReason(res.stopReason)
+			if err != nil {
+				return err
+			}
+			return onChunk(backend.StreamChunk{FinishReason: finish})
+		case <-ctx.Done():
+			_ = c.notify("session/cancel", map[string]any{"sessionId": sess.SessionID})
+			return ctx.Err()
+		}
+	}
+}
+
 func (b *Backend) selectModel(ctx context.Context, c *conn, session string, opts []configOption, model string) error {
 	opt, ok := modelOption(opts)
 	if !ok {
