@@ -14,10 +14,10 @@ Branch: `feat/streaming-sse` (base `1897025`). Delivery: ask-on-risk. Test runne
 
 ## Tasks
 
-- [x] T1 — S2: `backend.Backend` streaming contract (`StreamChunk`, `Stream` method) + `Registry` support and unit tests. Route: inline. Commit pending.
-- [x] T2 — S3, S5: `internal/backend/antigravity` streaming implementation over ACP with cancellation; fake agent streaming tests. Route: inline. Commit pending.
-- [x] T3 — S4, S5: `internal/server` `stream: true` SSE handler, chunk encoding and `data: [DONE]` terminator with tests. Route: inline. Commit pending.
-- [x] T4 — S6: End-to-end integration check, race detector sweep (`go test -race ./...`), and ticket 03 update. Route: inline. Commit pending.
+- [x] T1 — S2: `backend.Backend` streaming contract (`StreamChunk`, `Stream` method) + `Registry` support and unit tests. Route: inline. Commit `81b5e55`.
+- [x] T2 — S3, S5: `internal/backend/antigravity` streaming implementation over ACP with cancellation; fake agent streaming tests. Route: inline. Commit `81b5e55`.
+- [x] T3 — S4, S5: `internal/server` `stream: true` SSE handler, chunk encoding and `data: [DONE]` terminator with tests. Route: inline. Commit `81b5e55`.
+- [x] T4 — S6: End-to-end integration check, race detector sweep (`go test -race ./...`), and ticket 03 update. Route: inline. Commit `81b5e55`.
 
 ## Log
 
