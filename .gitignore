@@ -6,6 +6,16 @@
 *.dylib
 bin/
 dist/
+subpipe
 
 # Test and probe scratches
 .scratch/probe/
+
+# Local agent metadata and caches
+.atl/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -47,38 +47,83 @@ Los proxies inversos convencionales intentan engañar a `cloudcode-pa.googleapis
 
 ---
 
-## Arranque
+## Requisitos previos
 
-Requisitos: Go 1.27+ y la CLI `agy` de Antigravity en el `PATH`, con sesión iniciada una vez (`agy` interactivo o `agy acp --login`). subpipe nunca maneja credenciales.
+1. **Go 1.22+** (o superior).
+2. **Antigravity CLI (`agy`)** instalado en el sistema y con sesión iniciada una vez:
+   - **Instalación oficial:** Consulta [antigravity.google/download](https://antigravity.google/download#antigravity-cli).
+     - **Windows (PowerShell):** `irm https://antigravity.google/cli/install.ps1 | iex`
+     - **macOS / Linux:** `curl -fsSL https://antigravity.google/cli/install.sh | bash`
+   - **Autenticación:** Iniciar sesión con la cuenta de Google ejecutando `agy` interactivo o `agy acp --login` (o teniendo la app de escritorio de Antigravity iniciada). `subpipe` nunca toca credenciales.
 
+---
+
+## Arranque rápido
+
+### 1. Ejecución directa
 ```bash
-go run ./cmd/subpipe                      # escucha en 127.0.0.1:9099
-go run ./cmd/subpipe -addr 127.0.0.1:9100 -agy "C:\Program Files\Antigravity\agy.exe" -workdir D:\tmp\agy-work
+go run ./cmd/subpipe
+```
+Por defecto, `subpipe` escucha en `http://127.0.0.1:9099/v1` y localiza automáticamente `agy` en el `PATH` del sistema.
+
+### 2. Compilar el binario ejecutable
+```bash
+# Linux / macOS
+go build -o subpipe ./cmd/subpipe
+./subpipe
+
+# Windows PowerShell
+go build -o subpipe.exe ./cmd/subpipe
+.\subpipe.exe
 ```
 
-| Flag | Default | Uso |
-| --- | --- | --- |
-| `-addr` | `127.0.0.1:9099` | Dirección de escucha. |
-| `-agy` | `agy` | Ruta al binario `agy` (admite espacios); subpipe lo lanza como `<agy> acp`. Su stderr se reenvía al stderr de subpipe. |
-| `-workdir` | `<temp>/subpipe-antigravity` | Directorio de trabajo de las sesiones de `agy`. |
-| `-config-dir` | (vacío o `GEMINI_DIR`/`AGY_CONFIG_DIR`) | Directorio de perfil/configuración para aislar credenciales entre instancias multi-cuenta. |
-| `-watchdog` | `true` | Reinicia automáticamente el subproceso si termina inesperadamente. |
+---
 
-Endpoints disponibles:
-- `POST /v1/chat/completions`: unario (`stream: false`) y streaming SSE (`stream: true`).
-- `GET /v1/models`: lista el catálogo de modelos prefijados (`antigravity/gemini-3.8-pro`, etc.).
-- `GET /healthz`: reporte de salud del gateway y del subproceso (vivo, inicializado, autenticado).
+## Parámetros de configuración
+
+| Flag | Variable de Entorno | Default | Descripción |
+| --- | --- | --- | --- |
+| `-addr` | — | `127.0.0.1:9099` | Dirección y puerto de escucha HTTP del gateway. |
+| `-agy` | — | `agy` | Ruta al binario ejecutable de `agy` (admite rutas con espacios). |
+| `-workdir` | — | `<temp>/subpipe-antigravity` | Directorio de trabajo local para las sesiones de `agy`. |
+| `-config-dir` | `GEMINI_DIR` o `AGY_CONFIG_DIR` | (vacío / default del sistema) | Directorio de perfil/configuración para aislar credenciales en entornos multi-cuenta. |
+| `-watchdog` | — | `true` | Reinicia automáticamente el subproceso hijo si termina inesperadamente. |
+
+Ejemplo con parámetros personalizados:
+```bash
+# Ejemplo en Linux / macOS
+./subpipe -addr 127.0.0.1:9100 -workdir /tmp/subpipe-work -config-dir ~/.antigravity/perfil2
+
+# Ejemplo en Windows
+.\subpipe.exe -addr 127.0.0.1:9100 -config-dir "C:\Perfiles\Cuenta2"
+```
+
+---
+
+## Endpoints disponibles
+
+`subpipe` implementa la especificación estándar de la API de OpenAI:
+
+* **`POST /v1/chat/completions`**: Modo unario (`stream: false`) y modo streaming SSE (`stream: true`).
+* **`GET /v1/models`**: Lista el catálogo dinámico de modelos prefijados (`antigravity/gemini-3.8-flash`, etc.).
+* **`GET /healthz`**: Reporte de salud del gateway y del subproceso (`alive`, `initialized`, `authenticated`).
+
+### Pruebas rápidas con `curl`:
 
 ```bash
-# Chat unario
-curl http://127.0.0.1:9099/v1/chat/completions -H "Content-Type: application/json" \
-  -d '{"model":"antigravity/gemini-3.8-pro","messages":[{"role":"user","content":"hola"}]}'
+# 1. Comprobar salud
+curl http://127.0.0.1:9099/healthz
 
-# Catálogo de modelos
+# 2. Consultar catálogo de modelos disponibles
 curl http://127.0.0.1:9099/v1/models
 
-# Chequeo de salud
-curl http://127.0.0.1:9099/healthz
+# 3. Chat unario estándar
+curl http://127.0.0.1:9099/v1/chat/completions -H "Content-Type: application/json" \
+  -d '{"model":"antigravity/gemini-3.8-flash","messages":[{"role":"user","content":"Hola"}]}'
+
+# 4. Streaming SSE en tiempo real
+curl -N http://127.0.0.1:9099/v1/chat/completions -H "Content-Type: application/json" \
+  -d '{"model":"antigravity/gemini-3.8-flash","stream":true,"messages":[{"role":"user","content":"Hola"}]}'
 ```
 
 ---
@@ -86,7 +131,7 @@ curl http://127.0.0.1:9099/healthz
 ## Modos de integración
 
 ### 1. Conexión directa (Recomendado)
-Apunta tu cliente de desarrollo directamente al puerto de `subpipe`:
+Apunta cualquier cliente compatible con OpenAI al puerto local de `subpipe`:
 
 * **OpenCode:**
   ```json
@@ -94,21 +139,21 @@ Apunta tu cliente de desarrollo directamente al puerto de `subpipe`:
     "provider": {
       "name": "subpipe",
       "baseUrl": "http://127.0.0.1:9099/v1",
-      "model": "antigravity/gemini-3.8-pro"
+      "model": "antigravity/gemini-3.8-flash"
     }
   }
   ```
 * **Aider:**
   ```bash
-  aider --openai-api-base http://127.0.0.1:9099/v1 --model openai/antigravity/gemini-3.8-pro
+  aider --openai-api-base http://127.0.0.1:9099/v1 --model openai/antigravity/gemini-3.8-flash
   ```
 * **Cursor / Windsurf:**
-  En ajustes de proveedor OpenAI, sobrescribir *Base URL* con `http://127.0.0.1:9099/v1`.
+  En los ajustes de proveedor OpenAI, sobrescribir *Base URL* con `http://127.0.0.1:9099/v1`.
 
 ### 2. Como Upstream de CPAM / CLIProxyAPI
 Si utilizas CPAM y quieres conservar su panel web, métricas y gestión de cuotas:
 
-1. Mantén `subpipe` corriendo en Windows en `127.0.0.1:9099`.
+1. Mantén `subpipe` corriendo en `127.0.0.1:9099`.
 2. En el `config.yaml` de CPAM, añade a `subpipe` como un canal OpenAI compatible:
    ```yaml
    openai-compatibility:
@@ -127,13 +172,13 @@ CPAM gestionará la interfaz, pero delegará la salida a `subpipe`, evitando la 
 
 Para operar con varias cuentas sin que se mezclen sesiones ni se disparen bloqueos:
 
-* **Perfiles independientes:** Configurar variables de entorno (`USERPROFILE` o `-config_dir`) por cada cuenta (ej. `~/antigravity_profiles/cuenta_1`, `~/antigravity_profiles/cuenta_2`).
+* **Perfiles independientes:** Configurar variables de entorno (`GEMINI_DIR` / `AGY_CONFIG_DIR`) o el flag `-config-dir` por cada cuenta (ej. `~/antigravity_profiles/cuenta_1`, `~/antigravity_profiles/cuenta_2`).
 * **Multiplexores de terminal (ej. Herdr):** Asignar un perfil exclusivo a cada espacio de trabajo. Cada tarea mantiene afinidad física de sesión con su cuenta asignada.
 * **Git Worktrees:** Para trabajar concurrentemente en el mismo repositorio desde dos cuentas distintas sin colisiones en disco.
 
 ---
 
-## Documentación detallada
+## Documentación técnica detallada
 
 Para un análisis a fondo de la evidencia forense, matrices comparativas y el plan de implementación, consulta el informe completo:
-* [informe_propuesta_puente_hibrido_antigravity.md](file:///D:/DocumentosDiscoD/subpipe/informe_propuesta_puente_hibrido_antigravity.md)
+* [informe_propuesta_puente_hibrido_antigravity.md](informe_propuesta_puente_hibrido_antigravity.md)
