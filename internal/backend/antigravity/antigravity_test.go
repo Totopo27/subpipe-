@@ -1,6 +1,7 @@
 package antigravity
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -224,6 +225,101 @@ func TestDeadChildIsRespawnedOnNextRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	if resp.Content != "model=gemini-3.8-pro;prompt=y" {
+		t.Fatalf("Content = %q", resp.Content)
+	}
+	if n := countEvent(logPath, "start"); n != 2 {
+		t.Fatalf("agent started %d times, want 2", n)
+	}
+}
+
+func TestCompleteMapsUnknownStopReasonToStop(t *testing.T) {
+	b, _ := newFake(t, "oddstop")
+	resp, err := b.Complete(context.Background(), backend.Request{Model: "gemini-3.8-pro", Messages: userMsg("x")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Content != "done" || resp.FinishReason != "stop" {
+		t.Fatalf("resp = %+v, want the text with finish reason stop", resp)
+	}
+}
+
+func TestCompleteAcceptsStringResponseIDs(t *testing.T) {
+	b, _ := newFake(t, "stringids")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	resp, err := b.Complete(ctx, backend.Request{Model: "gemini-3.8-flash", Messages: userMsg("hi")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Content != "model=gemini-3.8-flash;prompt=hi" {
+		t.Fatalf("Content = %q", resp.Content)
+	}
+}
+
+// syncBuffer is a bytes.Buffer safe for the copier goroutine exec starts.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
+}
+
+func TestAgentStderrIsForwarded(t *testing.T) {
+	b, _ := newFake(t, "ok")
+	var stderr syncBuffer
+	b.cfg.Stderr = &stderr
+	if _, err := b.Complete(context.Background(), backend.Request{Model: "gemini-3.8-pro", Messages: userMsg("x")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stderr.String(), "fake agent: diagnostics on stderr") {
+		t.Fatalf("stderr = %q, want the agent's diagnostics", stderr.String())
+	}
+}
+
+// failingWriter stands in for an agent stdin whose pipe broke.
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("broken pipe") }
+func (failingWriter) Close() error              { return nil }
+
+func TestBrokenStdinRespawnsTheAgent(t *testing.T) {
+	b, logPath := newFake(t, "ok")
+	if _, err := b.Complete(context.Background(), backend.Request{Model: "gemini-3.8-pro", Messages: userMsg("x")}); err != nil {
+		t.Fatal(err)
+	}
+	old := b.conn
+	realStdin := old.stdin
+	t.Cleanup(func() { _ = realStdin.Close() })
+	old.wmu.Lock()
+	old.stdin = failingWriter{} // stdout stays open: the child is still running
+	old.wmu.Unlock()
+
+	if _, err := b.Complete(context.Background(), backend.Request{Model: "gemini-3.8-pro", Messages: userMsg("y")}); err == nil {
+		t.Fatal("Complete over a broken stdin succeeded")
+	}
+	select {
+	case <-old.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the agent with the broken stdin was not stopped")
+	}
+	resp, err := b.Complete(context.Background(), backend.Request{Model: "gemini-3.8-pro", Messages: userMsg("z")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Content != "model=gemini-3.8-pro;prompt=z" {
 		t.Fatalf("Content = %q", resp.Content)
 	}
 	if n := countEvent(logPath, "start"); n != 2 {

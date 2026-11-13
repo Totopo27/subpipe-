@@ -53,13 +53,13 @@ Requisitos: Go 1.27+ y la CLI `agy` de Antigravity en el `PATH`, con sesión ini
 
 ```bash
 go run ./cmd/subpipe                      # escucha en 127.0.0.1:9099
-go run ./cmd/subpipe -addr 127.0.0.1:9100 -agy "C:\ruta\agy.exe acp" -workdir D:\tmp\agy-work
+go run ./cmd/subpipe -addr 127.0.0.1:9100 -agy "C:\Program Files\Antigravity\agy.exe" -workdir D:\tmp\agy-work
 ```
 
 | Flag | Default | Uso |
 | --- | --- | --- |
 | `-addr` | `127.0.0.1:9099` | Dirección de escucha. |
-| `-agy` | `agy acp` | Línea de comando que lanza el servidor ACP de Antigravity. |
+| `-agy` | `agy` | Ruta al binario `agy` (admite espacios); subpipe lo lanza como `<agy> acp`. Su stderr se reenvía al stderr de subpipe. |
 | `-workdir` | `<temp>/subpipe-antigravity` | Directorio de trabajo de las sesiones de `agy`. |
 
 Estado: `POST /v1/chat/completions` unario (`stream: false`). `stream: true` responde 400 hasta el ticket 03; `/v1/models` y `/healthz` llegan en el ticket 04.

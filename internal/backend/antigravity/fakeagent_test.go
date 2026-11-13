@@ -19,6 +19,7 @@ import (
 // its own read loop) so a protocol mistake cannot cancel itself out.
 func TestMain(m *testing.M) {
 	if mode := os.Getenv("SUBPIPE_FAKE_ACP"); mode != "" {
+		fmt.Fprintln(os.Stderr, "fake agent: diagnostics on stderr")
 		f := &fakeAgent{
 			mode:     mode,
 			log:      os.Getenv("SUBPIPE_FAKE_ACP_LOG"),
@@ -42,6 +43,10 @@ func TestMain(m *testing.M) {
 //	hang       never finish the turn until session/cancel, then "cancelled"
 //	maxtokens  one chunk, then stopReason max_tokens
 //	die-once   exit on the first prompt of the first process, then behave as ok
+//	oddstop    one chunk, then a stop reason this client does not know
+//	stringids  behave as ok, but echo request ids back as JSON strings
+//
+// Every mode writes one line to stderr at start.
 type fakeAgent struct {
 	mode string
 	log  string
@@ -88,7 +93,12 @@ func (f *fakeAgent) send(msg map[string]any) {
 	_, _ = f.out.Write(append(raw, '\n'))
 }
 
-func (f *fakeAgent) reply(id any, result any) { f.send(map[string]any{"id": id, "result": result}) }
+func (f *fakeAgent) reply(id any, result any) {
+	if f.mode == "stringids" {
+		id = fmt.Sprint(id)
+	}
+	f.send(map[string]any{"id": id, "result": result})
+}
 
 func (f *fakeAgent) fail(id any, code int, msg string) {
 	f.send(map[string]any{"id": id, "error": map[string]any{"code": code, "message": msg}})
@@ -296,6 +306,10 @@ func (f *fakeAgent) prompt(id any, params map[string]any) {
 	case "maxtokens":
 		f.chunk(sess, "partial")
 		f.reply(id, map[string]any{"stopReason": "max_tokens"})
+		return
+	case "oddstop":
+		f.chunk(sess, "done")
+		f.reply(id, map[string]any{"stopReason": "some_future_reason"})
 		return
 	}
 

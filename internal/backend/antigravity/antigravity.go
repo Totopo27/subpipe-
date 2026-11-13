@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,6 +40,9 @@ type Config struct {
 	WorkDir string
 	// Models overrides DefaultModels.
 	Models []string
+	// Stderr receives the child's stderr (ACP reserves it for logging);
+	// nil discards it.
+	Stderr io.Writer
 }
 
 // Backend implements backend.Backend over a persistent `agy acp` child.
@@ -105,7 +109,7 @@ func (b *Backend) connection(ctx context.Context) (*conn, bool, error) {
 		return nil, false, err
 	}
 	b.cfg.WorkDir = abs
-	c, err := startConn(b.cfg.Command, b.cfg.Env, abs)
+	c, err := startConn(b.cfg.Command, b.cfg.Env, abs, b.cfg.Stderr)
 	if err != nil {
 		return nil, false, err
 	}
@@ -270,7 +274,9 @@ func flatten(msgs []backend.Message) string {
 	return strings.Join(parts, "\n\n")
 }
 
-// finishReason maps an ACP stop reason to its OpenAI finish_reason.
+// finishReason maps an ACP stop reason to its OpenAI finish_reason. The turn
+// did complete, so a reason this client does not know yet (a newer ACP
+// version) keeps the text and reports "stop".
 func finishReason(stop string) (string, error) {
 	switch stop {
 	case "end_turn":
@@ -282,6 +288,6 @@ func finishReason(stop string) (string, error) {
 	case "cancelled":
 		return "", errors.New("agy cancelled the turn")
 	default:
-		return "", fmt.Errorf("unknown stop reason %q", stop)
+		return "stop", nil
 	}
 }

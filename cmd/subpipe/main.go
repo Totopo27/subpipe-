@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"time"
 
 	"subpipe/internal/backend"
@@ -19,11 +18,11 @@ import (
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:9099", "listen address")
-	agy := flag.String("agy", "agy acp", "command line that starts the Antigravity ACP server")
+	agy := flag.String("agy", "agy", "path to the agy binary; subpipe runs it as `<agy> acp`")
 	workdir := flag.String("workdir", "", "working directory for agy sessions (default: <temp>/subpipe-antigravity)")
 	flag.Parse()
 
-	ag := antigravity.New(antigravity.Config{Command: strings.Fields(*agy), WorkDir: *workdir})
+	ag := antigravity.New(backendConfig(*agy, *workdir))
 	defer ag.Close()
 	reg, err := backend.NewRegistry(ag)
 	if err != nil {
@@ -44,4 +43,10 @@ func main() {
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
+}
+
+// backendConfig builds the Antigravity backend config. agy is a single path,
+// never split, so install directories with spaces work.
+func backendConfig(agy, workdir string) antigravity.Config {
+	return antigravity.Config{Command: []string{agy, "acp"}, WorkDir: workdir, Stderr: os.Stderr}
 }

@@ -56,6 +56,7 @@ type conn struct {
 	pending map[int64]chan rpcMessage
 	turns   map[string]*turn // live prompt turns by session id
 	closed  bool
+	closing bool // close() ended stdin on purpose
 
 	done chan struct{} // closed when stdout ends and the child is reaped
 }
@@ -79,14 +80,15 @@ func (t *turn) String() string {
 }
 
 // startConn launches command with extra environment entries and starts
-// reading its stdout.
-func startConn(command, env []string, dir string) (*conn, error) {
+// reading its stdout. The child's stderr goes to stderr (nil discards it).
+func startConn(command, env []string, dir string, stderr io.Writer) (*conn, error) {
 	if len(command) == 0 {
 		return nil, errors.New("empty agy command")
 	}
 	cmd := exec.Command(command[0], command[1:]...)
 	cmd.Env = append(os.Environ(), env...)
 	cmd.Dir = dir
+	cmd.Stderr = stderr
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -149,8 +151,8 @@ func (c *conn) readLoop(stdout io.Reader) {
 func (c *conn) dispatch(msg *rpcMessage) {
 	switch {
 	case msg.Method == "" && msg.hasID():
-		id, err := strconv.ParseInt(string(msg.ID), 10, 64)
-		if err != nil {
+		id, ok := parseID(msg.ID)
+		if !ok {
 			return
 		}
 		c.mu.Lock()
@@ -165,6 +167,21 @@ func (c *conn) dispatch(msg *rpcMessage) {
 	case msg.Method == "session/update":
 		c.update(msg.Params)
 	}
+}
+
+// parseID reads the id of a response to one of our requests. We send numeric
+// ids, but JSON-RPC lets the agent echo them as strings, so accept both.
+func parseID(raw json.RawMessage) (int64, bool) {
+	var n int64
+	if json.Unmarshal(raw, &n) == nil {
+		return n, true
+	}
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	return n, err == nil
 }
 
 // update appends agent_message_chunk text to the session's turn. Every other
@@ -238,9 +255,24 @@ func (c *conn) write(msg rpcMessage) error {
 		return err
 	}
 	c.wmu.Lock()
-	defer c.wmu.Unlock()
 	_, err = c.stdin.Write(append(raw, '\n'))
+	c.wmu.Unlock()
+	if err != nil {
+		c.broken()
+	}
 	return err
+}
+
+// broken kills a child whose stdin can no longer be written. Its stdout then
+// ends, the read loop marks the conn dead, and the next request respawns it;
+// otherwise a live stdout would keep a conn nobody can talk to.
+func (c *conn) broken() {
+	c.mu.Lock()
+	closing := c.closing
+	c.mu.Unlock()
+	if !closing {
+		_ = c.cmd.Process.Kill()
+	}
 }
 
 // call sends a request and decodes its result into out (which may be nil).
@@ -315,6 +347,9 @@ func (c *conn) untrack(session string) {
 // close ends stdin (the ACP way to stop an agent) and kills the child if it
 // is still running after grace.
 func (c *conn) close(grace time.Duration) error {
+	c.mu.Lock()
+	c.closing = true
+	c.mu.Unlock()
 	_ = c.stdin.Close()
 	select {
 	case <-c.done:
