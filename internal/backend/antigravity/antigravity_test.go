@@ -3,6 +3,7 @@ package antigravity
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -253,6 +254,23 @@ func TestCompleteAcceptsStringResponseIDs(t *testing.T) {
 	}
 	if resp.Content != "model=gemini-3.8-flash;prompt=hi" {
 		t.Fatalf("Content = %q", resp.Content)
+	}
+}
+
+func TestParseIDAcceptsNumbersAndNumericStrings(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want int64
+		ok   bool
+	}{
+		{"123", 123, true}, {`"123"`, 123, true}, {`"-42"`, -42, true},
+		{`""`, 0, false}, {`"abc"`, 0, false}, {"1.5", 0, false}, {"true", 0, false}, {"{}", 0, false},
+	}
+	for _, c := range cases {
+		got, ok := parseID(json.RawMessage(c.raw))
+		if ok != c.ok || (ok && got != c.want) {
+			t.Errorf("parseID(%s) = (%d, %v), want (%d, %v)", c.raw, got, ok, c.want, c.ok)
+		}
 	}
 }
 
