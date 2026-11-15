@@ -35,9 +35,11 @@ type server struct {
 }
 
 type chatRequest struct {
-	Model    string        `json:"model"`
-	Messages []chatMessage `json:"messages"`
-	Stream   bool          `json:"stream"`
+	Model      string          `json:"model"`
+	Messages   []chatMessage   `json:"messages"`
+	Stream     bool            `json:"stream"`
+	Tools      json.RawMessage `json:"tools"`
+	ToolChoice json.RawMessage `json:"tool_choice"`
 }
 
 type chatMessage struct {
@@ -74,6 +76,20 @@ func (s *server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error(), "", "")
 		return
+	}
+	// RawMessage distinguishes an absent field from an explicit null. Reject
+	// tool fields by presence rather than silently accepting unsupported intent.
+	for _, field := range []struct {
+		name  string
+		value json.RawMessage
+	}{
+		{"tools", req.Tools},
+		{"tool_choice", req.ToolChoice},
+	} {
+		if field.value != nil {
+			writeError(w, http.StatusBadRequest, field.name+" is not supported", field.name, "")
+			return
+		}
 	}
 	if len(req.Messages) == 0 {
 		writeError(w, http.StatusBadRequest, "messages must not be empty", "messages", "")

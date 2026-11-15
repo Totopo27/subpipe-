@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -137,6 +138,94 @@ func TestStreamDefaultsToUnary(t *testing.T) {
 	rec := post(newServer(t, fb), `{"model":"fake/m1","messages":[{"role":"user","content":"hi"}]}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body)
+	}
+}
+
+func TestUnsupportedToolFieldsAre400(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		for _, tt := range []struct {
+			name  string
+			field string
+			value string
+		}{
+			{"tools catalogue", "tools", `[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]`},
+			{"empty tools", "tools", `[]`},
+			{"null tools", "tools", `null`},
+			{"empty string tools", "tools", `""`},
+			{"automatic choice", "tool_choice", `"auto"`},
+			{"disabled choice", "tool_choice", `"none"`},
+			{"named choice", "tool_choice", `{"type":"function","function":{"name":"lookup"}}`},
+			{"null choice", "tool_choice", `null`},
+			{"empty string choice", "tool_choice", `""`},
+		} {
+			t.Run(fmt.Sprintf("%s/stream=%t", tt.name, stream), func(t *testing.T) {
+				fb := &fakeBackend{resp: backend.Response{Content: "must not run"}}
+				body := fmt.Sprintf(`{"model":"fake/m1","messages":[{"role":"user","content":"hi"}],"stream":%t,%q:%s}`, stream, tt.field, tt.value)
+				rec := post(newServer(t, fb), body)
+				if rec.Code != http.StatusBadRequest {
+					t.Fatalf("status = %d, body %s", rec.Code, rec.Body)
+				}
+				if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+					t.Errorf("Content-Type = %q, want application/json", ct)
+				}
+				e := decodeError(t, rec)
+				if e.Error.Type != "invalid_request_error" || e.Error.Param == nil || *e.Error.Param != tt.field ||
+					e.Error.Message != tt.field+" is not supported" || e.Error.Code != nil {
+					t.Errorf("error = %s", rec.Body)
+				}
+				if fb.got.Model != "" || fb.got.Messages != nil {
+					t.Errorf("backend called with %+v", fb.got)
+				}
+			})
+		}
+	}
+}
+
+func TestUnrelatedUnknownFieldsRemainIgnored(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%t", stream), func(t *testing.T) {
+			fb := &fakeBackend{
+				resp:   backend.Response{Content: "hello", FinishReason: "stop"},
+				stream: []backend.StreamChunk{{Content: "hello"}, {FinishReason: "stop"}},
+			}
+			body := fmt.Sprintf(`{"model":"fake/m1","messages":[{"role":"developer","content":"be nice"},{"role":"user","content":"hi"}],"stream":%t,"client_metadata":{"trace":"local"}}`, stream)
+			rec := post(newServer(t, fb), body)
+			if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "hello") {
+				t.Fatalf("status = %d, body %s", rec.Code, rec.Body)
+			}
+			if fb.got.Model != "m1" || len(fb.got.Messages) != 2 ||
+				fb.got.Messages[0] != (backend.Message{Role: "system", Content: "be nice"}) ||
+				fb.got.Messages[1] != (backend.Message{Role: "user", Content: "hi"}) {
+				t.Errorf("backend request = %+v", fb.got)
+			}
+			if stream {
+				if rec.Header().Get("Content-Type") != "text/event-stream" || !strings.HasSuffix(rec.Body.String(), "data: [DONE]\n\n") {
+					t.Errorf("invalid SSE response: %s", rec.Body)
+				}
+			} else if rec.Header().Get("Content-Type") != "application/json" {
+				t.Errorf("Content-Type = %q", rec.Header().Get("Content-Type"))
+			}
+		})
+	}
+}
+
+func TestToolsReportedBeforeToolChoice(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%t", stream), func(t *testing.T) {
+			fb := &fakeBackend{}
+			body := fmt.Sprintf(`{"model":"fake/m1","messages":[{"role":"user","content":"hi"}],"stream":%t,"tool_choice":"none","tools":[]}`, stream)
+			rec := post(newServer(t, fb), body)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, body %s", rec.Code, rec.Body)
+			}
+			e := decodeError(t, rec)
+			if e.Error.Param == nil || *e.Error.Param != "tools" || e.Error.Message != "tools is not supported" {
+				t.Errorf("error = %s", rec.Body)
+			}
+			if fb.got.Model != "" || fb.got.Messages != nil {
+				t.Errorf("backend called with %+v", fb.got)
+			}
+		})
 	}
 }
 

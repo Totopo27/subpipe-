@@ -102,11 +102,26 @@ Ejemplo con parámetros personalizados:
 
 ## Endpoints disponibles
 
-`subpipe` implementa la especificación estándar de la API de OpenAI:
+`subpipe` implementa un subconjunto de la API de OpenAI compatible con chat de texto, no la especificación completa:
 
 * **`POST /v1/chat/completions`**: Modo unario (`stream: false`) y modo streaming SSE (`stream: true`).
 * **`GET /v1/models`**: Lista el catálogo dinámico de modelos prefijados (`antigravity/gemini-3.8-flash`, etc.).
 * **`GET /healthz`**: Reporte de salud del gateway y del subproceso (`alive`, `initialized`, `authenticated`).
+
+### Alcance de compatibilidad
+
+- Chat admite `model`, `messages` y `stream`; `stream` omitido equivale a `false`.
+- Los roles admitidos son `system`, `developer` (normalizado a `system`), `user` y `assistant`. El contenido puede ser texto o una lista de partes de tipo `text`.
+- No se admiten herramientas del cliente ni el ciclo `tool_calls` → resultado con rol `tool`. La presencia de `tools` o `tool_choice` devuelve HTTP 400 con `error.type: "invalid_request_error"` y `error.param` indicando el campo, antes de invocar al Backend o abrir un stream SSE. Esto incluye `tools: []`, valores `null` y `tool_choice: "none"`; omite ambos campos para usar chat de texto. Si aparecen ambos, se informa primero `tools`.
+- El rol `tool` y las partes de contenido no textual también se rechazan. Otros campos desconocidos continúan ignorándose; su aceptación no implica que se apliquen sus opciones.
+
+Ejemplo de error para una petición que incluye `tools`:
+
+```json
+{"error":{"message":"tools is not supported","type":"invalid_request_error","param":"tools","code":null}}
+```
+
+Consulta [las consideraciones para futuras herramientas](docs/tool-integration-considerations.md) para lo que queda fuera de este alcance.
 
 ### Pruebas rápidas con `curl`:
 
@@ -131,7 +146,7 @@ curl -N http://127.0.0.1:9099/v1/chat/completions -H "Content-Type: application/
 ## Modos de integración
 
 ### 1. Conexión directa (Recomendado)
-Apunta cualquier cliente compatible con OpenAI al puerto local de `subpipe`:
+Apunta un cliente compatible con OpenAI al puerto local de `subpipe` usando únicamente el subconjunto de chat de texto descrito arriba. Las integraciones siguientes no habilitan herramientas del cliente:
 
 * **OpenCode:**
   ```json
